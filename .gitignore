@@ -3,3 +3,8 @@ spike-cert.pem
 spike-key.pem
 dist/
 *.log
+x-hmi.exe
+*.log
+*.db
+*.db-shm
+*.db-wal

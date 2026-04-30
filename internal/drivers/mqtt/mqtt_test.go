@@ -15,36 +15,56 @@ import (
 )
 
 // startBroker spins an in-process MQTT broker on a random port for testing.
-// Returns the broker URL (tcp://...) and a cleanup func.
+// Retries on port collision.
 func startBroker(t *testing.T) (string, func()) {
 	t.Helper()
-	port, err := freePort()
-	if err != nil {
-		t.Fatalf("freePort: %v", err)
-	}
-	server := mochi.New(nil)
-	if err := server.AddHook(new(auth.AllowHook), nil); err != nil {
-		t.Fatalf("AddHook: %v", err)
-	}
-	addr := fmt.Sprintf(":%d", port)
-	if err := server.AddListener(listeners.NewTCP(listeners.Config{ID: "t1", Address: addr})); err != nil {
-		t.Fatalf("AddListener: %v", err)
-	}
-	go func() { _ = server.Serve() }()
+	for attempt := 0; attempt < 5; attempt++ {
+		port, err := freePort()
+		if err != nil {
+			t.Fatalf("freePort: %v", err)
+		}
+		server := mochi.New(nil)
+		if err := server.AddHook(new(auth.AllowHook), nil); err != nil {
+			t.Fatalf("AddHook: %v", err)
+		}
+		addr := fmt.Sprintf("127.0.0.1:%d", port)
+		if err := server.AddListener(listeners.NewTCP(listeners.Config{ID: "t1", Address: addr})); err != nil {
+			_ = server.Close()
+			continue
+		}
+		serveErr := make(chan error, 1)
+		go func() { serveErr <- server.Serve() }()
 
-	// wait for listener to be ready
-	deadline := time.Now().Add(2 * time.Second)
+		// wait until accept loop is up
+		ok := waitDial(addr, 2*time.Second)
+		if !ok {
+			_ = server.Close()
+			continue
+		}
+		cleanup := func() {
+			_ = server.Close()
+			select {
+			case <-serveErr:
+			case <-time.After(time.Second):
+			}
+		}
+		return "tcp://" + addr, cleanup
+	}
+	t.Fatalf("could not start broker after 5 attempts")
+	return "", nil
+}
+
+func waitDial(addr string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		c, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		c, err := net.Dial("tcp", addr)
 		if err == nil {
 			c.Close()
-			break
+			return true
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-
-	cleanup := func() { _ = server.Close() }
-	return fmt.Sprintf("tcp://127.0.0.1:%d", port), cleanup
+	return false
 }
 
 func freePort() (int, error) {
