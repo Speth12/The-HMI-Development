@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,8 +24,9 @@ const (
 	defaultCert = "opcua-cert.pem"
 	defaultKey  = "opcua-key.pem"
 	appURI      = "urn:x-hmi:runtime"
-	browseDepth = 6
-	subInterval = 500 * time.Millisecond
+	browseDepth    = 10
+	browseMaxRefs  = 1000
+	subInterval    = 500 * time.Millisecond
 )
 
 // Driver implements drivers.ProtocolDriver.
@@ -97,12 +100,16 @@ func (d *Driver) Connect(ctx context.Context, cfg drivers.DriverConfig) error {
 		)
 	}
 
-	c, err := opcua.NewClient(ep.EndpointURL, opts...)
+	// Servers often advertise their own hostname in EndpointURL (e.g. "axc-f-3152-1")
+	// which may not be DNS-resolvable. Keep the path/scheme from the server's URL
+	// but substitute the host we actually dialled.
+	connectURL := overrideHost(ep.EndpointURL, cfg.Endpoint)
+	c, err := opcua.NewClient(connectURL, opts...)
 	if err != nil {
 		return d.fail(fmt.Errorf("NewClient: %w", err))
 	}
 
-	log.Printf("[DRIVER] opcua: connecting to %s mode=%v", ep.EndpointURL, ep.SecurityMode)
+	log.Printf("[DRIVER] opcua: connecting to %s mode=%v", connectURL, ep.SecurityMode)
 	if err = c.Connect(ctx); err != nil {
 		return d.fail(fmt.Errorf("Connect: %w", err))
 	}
@@ -129,7 +136,9 @@ func (d *Driver) Disconnect() error {
 	return c.Close(context.Background())
 }
 
-// Browse walks the address space starting at the Objects folder.
+// Browse walks the address space starting at the Objects folder, then also
+// tries the PLCnext GDS root (ns=6;s=Arp.Plc.Eclr) so application variables
+// show up even when they sit deeper than the normal browse reaches.
 func (d *Driver) Browse(ctx context.Context) ([]drivers.TagDefinition, error) {
 	c := d.getClient()
 	if c == nil {
@@ -137,6 +146,52 @@ func (d *Driver) Browse(ctx context.Context) ([]drivers.TagDefinition, error) {
 	}
 	var out []drivers.TagDefinition
 	d.browseRecursive(ctx, c, ua.NewNumericNodeID(0, id.ObjectsFolder), 0, &out)
+
+	// PLCnext-specific: try to browse ns=6;s=Arp.Plc.Eclr directly.
+	if plcRoot, err := ua.ParseNodeID("ns=6;s=Arp.Plc.Eclr"); err == nil {
+		d.browseRecursive(ctx, c, plcRoot, 0, &out)
+	}
+
+	// Keep only string-identifier nodes (ns=x;s=...) — those are user-defined
+	// application variables. Numeric node IDs (TwoByte/FourByte/Numeric) across
+	// all namespaces are OPC UA infrastructure. Also drop ns=0 (OPC UA standard).
+	filtered := out[:0]
+	for _, t := range out {
+		nid, err := ua.ParseNodeID(t.Path)
+		if err != nil || nid.Namespace() == 0 {
+			continue
+		}
+		// Only keep string node IDs (type 3). TwoByte(0), FourByte(1), and
+		// Numeric(2) are all numeric identifiers regardless of namespace.
+		if nid.Type() != ua.NodeIDTypeString {
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	out = filtered
+
+	// Deduplicate by path.
+	seen := make(map[string]bool, len(out))
+	deduped := out[:0]
+	for _, t := range out {
+		if !seen[t.Path] {
+			seen[t.Path] = true
+			deduped = append(deduped, t)
+		}
+	}
+	out = deduped
+
+	// Sort: higher namespaces first (ns=6 PLCnext app vars before ns=5 device info,
+	// etc.), then alphabetically within each namespace.
+	sort.Slice(out, func(i, j int) bool {
+		ni, _ := ua.ParseNodeID(out[i].Path)
+		nj, _ := ua.ParseNodeID(out[j].Path)
+		if ni.Namespace() != nj.Namespace() {
+			return ni.Namespace() > nj.Namespace()
+		}
+		return out[i].Description < out[j].Description
+	})
+
 	d.tagCount.Store(int32(len(out)))
 	return out, nil
 }
@@ -146,7 +201,7 @@ func (d *Driver) browseRecursive(ctx context.Context, c *opcua.Client, nodeID *u
 		return
 	}
 	req := &ua.BrowseRequest{
-		RequestedMaxReferencesPerNode: 200,
+		RequestedMaxReferencesPerNode: browseMaxRefs,
 		NodesToBrowse: []*ua.BrowseDescription{{
 			NodeID:          nodeID,
 			BrowseDirection: ua.BrowseDirectionForward,
@@ -175,96 +230,80 @@ func (d *Driver) browseRecursive(ctx context.Context, c *opcua.Client, nodeID *u
 	}
 }
 
-// Subscribe creates an OPC UA subscription for the given node IDs.
-// Updates flow into ch as tagstore.TagUpdate values until ctx is cancelled.
+// Subscribe polls the given OPC UA node IDs at subInterval and pushes updates
+// into ch until ctx is cancelled. Polling is used in place of subscriptions
+// because PLCnext closes the TCP connection after responding to
+// CreateMonitoredItems, which causes gopcua to return EOF before the response
+// is read, making it impossible to confirm subscription success.
 func (d *Driver) Subscribe(ctx context.Context, paths []string, ch chan<- tagstore.TagUpdate) error {
-	c := d.getClient()
-	if c == nil {
-		return fmt.Errorf("opcua: not connected")
-	}
 	if len(paths) == 0 {
 		return fmt.Errorf("opcua: no paths to subscribe")
 	}
 
-	notifyCh := make(chan *opcua.PublishNotificationData, 256)
-	sub, err := c.Subscribe(ctx, &opcua.SubscriptionParameters{
-		Interval: subInterval,
-	}, notifyCh)
-	if err != nil {
-		return fmt.Errorf("opcua: subscribe: %w", err)
-	}
-
-	pathsByHandle := make(map[uint32]string, len(paths))
-	for i, p := range paths {
+	nodeIDs := make([]*ua.NodeID, 0, len(paths))
+	validPaths := make([]string, 0, len(paths))
+	for _, p := range paths {
 		nid, err := ua.ParseNodeID(p)
 		if err != nil {
 			log.Printf("[DRIVER] opcua: bad node id %q: %v", p, err)
 			continue
 		}
-		handle := uint32(i + 1)
-		req := &ua.MonitoredItemCreateRequest{
-			ItemToMonitor: &ua.ReadValueID{
-				NodeID:      nid,
-				AttributeID: ua.AttributeIDValue,
-			},
-			MonitoringMode: ua.MonitoringModeReporting,
-			RequestedParameters: &ua.MonitoringParameters{
-				ClientHandle:     handle,
-				SamplingInterval: float64(subInterval.Milliseconds()),
-				QueueSize:        10,
-				DiscardOldest:    true,
-			},
-		}
-		res, err := sub.Monitor(ctx, ua.TimestampsToReturnBoth, req)
-		if err != nil || res.Results[0].StatusCode != ua.StatusOK {
-			log.Printf("[DRIVER] opcua: monitor %s: err=%v status=%v", p, err, statusOf(res))
-			continue
-		}
-		pathsByHandle[handle] = p
-		log.Printf("[DRIVER] opcua: subscribed %s", p)
+		nodeIDs = append(nodeIDs, nid)
+		validPaths = append(validPaths, p)
+		log.Printf("[DRIVER] opcua: polling %s", p)
+	}
+	if len(nodeIDs) == 0 {
+		return fmt.Errorf("opcua: no valid node ids")
 	}
 
-	go d.runSubscription(ctx, sub, notifyCh, pathsByHandle, ch)
+	go d.pollLoop(ctx, validPaths, nodeIDs, ch)
 	return nil
 }
 
-func (d *Driver) runSubscription(ctx context.Context, sub *opcua.Subscription, notifyCh <-chan *opcua.PublishNotificationData, pathsByHandle map[uint32]string, out chan<- tagstore.TagUpdate) {
-	defer sub.Cancel(context.Background())
+func (d *Driver) pollLoop(ctx context.Context, paths []string, nodeIDs []*ua.NodeID, out chan<- tagstore.TagUpdate) {
+	log.Printf("[DRIVER] opcua: pollLoop started for %d nodes", len(nodeIDs))
+	ticker := time.NewTicker(subInterval)
+	defer ticker.Stop()
+
+	readReq := &ua.ReadRequest{
+		TimestampsToReturn: ua.TimestampsToReturnBoth,
+		NodesToRead:        make([]*ua.ReadValueID, len(nodeIDs)),
+	}
+	for i, nid := range nodeIDs {
+		readReq.NodesToRead[i] = &ua.ReadValueID{
+			NodeID:      nid,
+			AttributeID: ua.AttributeIDValue,
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case notif, ok := <-notifyCh:
-			if !ok {
-				return
-			}
-			if notif.Error != nil {
-				log.Printf("[DRIVER] opcua: notification error: %v", notif.Error)
+		case <-ticker.C:
+			c := d.getClient()
+			if c == nil {
 				continue
 			}
-			dcn, ok := notif.Value.(*ua.DataChangeNotification)
-			if !ok {
+			res, err := c.Read(ctx, readReq)
+			if err != nil {
+				log.Printf("[DRIVER] opcua: poll read error: %v", err)
 				continue
 			}
-			for _, item := range dcn.MonitoredItems {
-				if item.Value == nil || item.Value.Value == nil {
-					continue
-				}
-				path := pathsByHandle[item.ClientHandle]
-				if path == "" {
+			for i, dv := range res.Results {
+				if dv == nil || dv.Value == nil {
 					continue
 				}
 				select {
 				case out <- tagstore.TagUpdate{
-					Path: path,
+					Path: paths[i],
 					State: tagstore.TagState{
-						Value:   item.Value.Value.Value(),
-						Quality: qualityFromStatus(item.Value.Status),
-						TS:      item.Value.SourceTimestamp.UnixNano(),
+						Value:   dv.Value.Value(),
+						Quality: qualityFromStatus(dv.Status),
+						TS:      dv.SourceTimestamp.UnixNano(),
 					},
 				}:
 				default:
-					// pump is slow; drop rather than block the OPC UA reader
 				}
 			}
 		}
@@ -365,3 +404,16 @@ func statusOf(res *ua.CreateMonitoredItemsResponse) ua.StatusCode {
 }
 
 func strPtr(s string) *string { return &s }
+
+// overrideHost replaces the host:port in serverURL with that of dialURL.
+// PLCs advertise their own hostname in endpoint descriptions; this lets us
+// connect via IP when DNS can't resolve the hostname.
+func overrideHost(serverURL, dialURL string) string {
+	srv, err1 := url.Parse(serverURL)
+	dial, err2 := url.Parse(dialURL)
+	if err1 != nil || err2 != nil || dial.Host == "" {
+		return serverURL
+	}
+	srv.Host = dial.Host
+	return srv.String()
+}

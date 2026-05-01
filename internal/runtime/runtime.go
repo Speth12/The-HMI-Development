@@ -22,12 +22,13 @@ type Runtime struct {
 	Store     *tagstore.TagStore
 	Historian *historian.Historian
 
-	mu      sync.RWMutex
-	drivers map[string]drivers.ProtocolDriver // datasource id → driver
-	cancel  context.CancelFunc
-	pumpCh  chan tagstore.TagUpdate
-	wg      sync.WaitGroup
-	project *project.Project
+	mu       sync.RWMutex
+	drivers  map[string]drivers.ProtocolDriver // datasource id → driver
+	cancel   context.CancelFunc
+	pumpCtx  context.Context
+	pumpCh   chan tagstore.TagUpdate
+	wg       sync.WaitGroup
+	project  *project.Project
 }
 
 // New returns an initialised runtime with the given store and historian.
@@ -48,6 +49,7 @@ func New(store *tagstore.TagStore, h *historian.Historian) *Runtime {
 func (r *Runtime) Start(ctx context.Context) {
 	pumpCtx, cancel := context.WithCancel(ctx)
 	r.cancel = cancel
+	r.pumpCtx = pumpCtx
 	r.wg.Add(1)
 	go r.pump(pumpCtx)
 }
@@ -86,30 +88,55 @@ func (r *Runtime) LoadProject(ctx context.Context, p *project.Project) error {
 	}
 	r.mu.Unlock()
 
-	// connect new ones
+	// connect new datasources, then subscribe all (new and existing) to bound tags
 	for _, ds := range p.Datasources {
-		if r.has(ds.ID) {
-			continue
+		if !r.has(ds.ID) {
+			drv, err := buildDriver(ds.Type)
+			if err != nil {
+				log.Printf("[RUNTIME] %s: %v — skipped", ds.ID, err)
+				continue
+			}
+			// Register driver before connecting so status endpoint always exists.
+			r.mu.Lock()
+			r.drivers[ds.ID] = drv
+			r.mu.Unlock()
+			cfg := buildConfig(ds)
+			if err := drv.Connect(ctx, cfg); err != nil {
+				log.Printf("[RUNTIME] %s: connect failed: %v", ds.ID, err)
+				// driver remains registered with connected=false; status shows the error
+			} else {
+				log.Printf("[RUNTIME] connected %s (%s)", ds.ID, ds.Type)
+			}
 		}
-		drv, err := buildDriver(ds.Type)
-		if err != nil {
-			log.Printf("[RUNTIME] %s: %v — skipped", ds.ID, err)
-			continue
-		}
-		cfg := buildConfig(ds)
-		if err := drv.Connect(ctx, cfg); err != nil {
-			log.Printf("[RUNTIME] %s: connect failed: %v", ds.ID, err)
-			continue
-		}
-		r.mu.Lock()
-		r.drivers[ds.ID] = drv
-		r.mu.Unlock()
-		log.Printf("[RUNTIME] connected %s (%s)", ds.ID, ds.Type)
 
-		// auto-subscribe to every tag bound by any widget on any page
+		// Subscribe every time so re-deploys with new bindings take effect.
+		drv := r.Driver(ds.ID)
+		if drv == nil {
+			continue
+		}
 		paths := tagsForDatasource(p, ds.ID)
 		if len(paths) > 0 {
-			if err := drv.Subscribe(ctx, paths, r.pumpCh); err != nil {
+			fanCh := make(chan tagstore.TagUpdate, 256)
+			dsID := ds.ID
+			go func() {
+				prefix := dsID + ":"
+				for {
+					select {
+					case u, ok := <-fanCh:
+						if !ok {
+							return
+						}
+						u.Path = prefix + u.Path
+						select {
+						case r.pumpCh <- u:
+						default:
+						}
+					case <-r.pumpCtx.Done():
+						return
+					}
+				}
+			}()
+			if err := drv.Subscribe(r.pumpCtx, paths, fanCh); err != nil {
 				log.Printf("[RUNTIME] %s: subscribe failed: %v", ds.ID, err)
 			}
 		}

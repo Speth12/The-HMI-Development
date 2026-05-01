@@ -3,7 +3,9 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Speth12/x-hmi/internal/project"
@@ -92,8 +94,25 @@ func (s *Server) handleBrowseDatasource(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, 200, defs)
 }
 
+func tagPathFromRequest(r *http.Request) string {
+	// Use RawPath when available so %2F in the tag path isn't split by the router.
+	raw := r.URL.RawPath
+	if raw == "" {
+		raw = r.URL.Path
+	}
+	idx := strings.Index(raw, "/tag/")
+	if idx < 0 {
+		return chi.URLParam(r, "*")
+	}
+	decoded, err := url.PathUnescape(raw[idx+5:])
+	if err != nil {
+		return chi.URLParam(r, "*")
+	}
+	return decoded
+}
+
 func (s *Server) handleReadTag(w http.ResponseWriter, r *http.Request) {
-	path := chi.URLParam(r, "path")
+	path := tagPathFromRequest(r)
 	state, ok := s.rt.Store.Get(path)
 	if !ok {
 		writeErr(w, 404, "tag not found")
@@ -103,7 +122,7 @@ func (s *Server) handleReadTag(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWriteTag(w http.ResponseWriter, r *http.Request) {
-	path := chi.URLParam(r, "path")
+	path := tagPathFromRequest(r)
 	defer r.Body.Close()
 	var body struct {
 		Datasource string `json:"datasource"`

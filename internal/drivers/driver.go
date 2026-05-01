@@ -36,9 +36,9 @@ type DriverConfig struct {
 
 // DriverStatus is returned by Status(). Safe to call from any goroutine.
 type DriverStatus struct {
-	Connected bool
-	LastError string
-	TagCount  int
+	Connected bool   `json:"connected"`
+	LastError string `json:"lastError,omitempty"`
+	TagCount  int    `json:"tagCount"`
 }
 
 // ProtocolDriver is implemented by every driver instance.

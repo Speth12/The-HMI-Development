@@ -1,10 +1,22 @@
 node_modules/
-spike-cert.pem
-spike-key.pem
 dist/
-*.log
+
+# compiled binaries
 x-hmi.exe
-*.log
+x-hmi.exe~
+x-hmi-plc
+x-hmi-plc-amd64
+
+# generated TLS certs
+*.pem
+
+# SQLite
 *.db
 *.db-shm
 *.db-wal
+
+# logs
+*.log
+
+# Vite / tsc build cache
+*.tsbuildinfo

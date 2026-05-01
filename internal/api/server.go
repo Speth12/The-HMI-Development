@@ -20,10 +20,27 @@ func New(rt *runtime.Runtime, assets http.Handler) *Server {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
+	r.Use(corsMiddleware)
 
 	s := &Server{rt: rt, router: r}
 	s.routes(assets)
 	return s
+}
+
+// corsMiddleware allows cross-origin requests from any origin so the IDE
+// (localhost:5173) can deploy directly to a remote runtime (e.g. PLC at
+// 10.0.0.210:8080) without a proxy.
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Handler returns the http.Handler for use by net/http.
@@ -44,8 +61,8 @@ func (s *Server) routes(assets http.Handler) {
 		})
 
 		r.Route("/tag", func(r chi.Router) {
-			r.Get("/{path}", s.handleReadTag)
-			r.Post("/{path}", s.handleWriteTag)
+			r.Get("/*", s.handleReadTag)
+			r.Post("/*", s.handleWriteTag)
 		})
 
 		r.Get("/history", s.handleHistory)

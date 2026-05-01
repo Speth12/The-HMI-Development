@@ -18,10 +18,14 @@ export function Palette() {
 
   const add = (type: WidgetType, w: number, h: number) => {
     if (!page) return;
+    // Read fresh state so rapid sequential adds each see the previous widget's position.
+    const { project: latest } = useProject.getState();
+    const latestPage = latest.pages.find((p) => p.id === activePageId) ?? page;
+    const nextY = latestPage.widgets.reduce((max, wg) => Math.max(max, wg.y + wg.h), 0);
     addWidget(page.id, {
       id: newWidgetId(),
       type,
-      x: 0, y: 0, w, h,
+      x: 0, y: nextY, w, h,
       config: { label: type },
     });
   };
