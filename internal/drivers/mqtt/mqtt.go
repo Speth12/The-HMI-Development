@@ -6,6 +6,7 @@ package mqtt
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -81,6 +82,19 @@ func (d *Driver) Connect(ctx context.Context, cfg drivers.DriverConfig) error {
 	d.mu.Lock()
 	d.client = c
 	d.mu.Unlock()
+
+	// Subscribe to # (all topics) for passive discovery.
+	// This lets Browse() return topics without any explicit Subscribe() calls.
+	discoveryHandler := func(_ mqttlib.Client, msg mqttlib.Message) {
+		topic := msg.Topic()
+		d.seenTopic.Store(topic, struct{}{})
+		d.tagCount.Store(int32(d.countSeen()))
+	}
+	// Use QoS 0 and don't block startup on failure.
+	tok = c.Subscribe("#", 0, discoveryHandler)
+	_ = tok.WaitTimeout(2 * time.Second)
+	log.Printf("[DRIVER] mqtt: wildcard discovery subscription active")
+
 	return nil
 }
 
@@ -120,7 +134,7 @@ func (d *Driver) Subscribe(ctx context.Context, paths []string, ch chan<- tagsto
 		case ch <- tagstore.TagUpdate{
 			Path: topic,
 			State: tagstore.TagState{
-				Value:   string(msg.Payload()),
+				Value:   parsePayload(msg.Payload()),
 				Quality: "Good",
 				TS:      time.Now().UnixNano(),
 			},
@@ -182,6 +196,20 @@ func (d *Driver) fail(err error) error {
 	s := err.Error()
 	d.lastErr.Store(&s)
 	return err
+}
+
+// parsePayload converts an MQTT payload to a typed value.
+// Tries JSON decode first (handles numbers, booleans, objects).
+// Falls back to the raw string.
+func parsePayload(b []byte) any {
+	if len(b) == 0 {
+		return ""
+	}
+	var v any
+	if err := json.Unmarshal(b, &v); err == nil {
+		return v
+	}
+	return string(b)
 }
 
 func toPayload(v any) []byte {

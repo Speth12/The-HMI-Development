@@ -6,6 +6,11 @@ x-hmi.exe
 x-hmi.exe~
 x-hmi-plc
 x-hmi-plc-amd64
+x-hmi-arm64
+
+# tsc transpiled JS alongside .ts/.tsx sources
+packages/ide/src/**/*.js
+packages/operator/src/**/*.js
 
 # generated TLS certs
 *.pem
@@ -20,3 +25,4 @@ x-hmi-plc-amd64
 
 # Vite / tsc build cache
 *.tsbuildinfo
+packages/ide/vite.config.js
