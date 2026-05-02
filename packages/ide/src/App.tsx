@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { Canvas } from "./panels/Canvas";
 import { Header } from "./panels/Header";
 import { PageTabs } from "./panels/PageTabs";
@@ -11,6 +12,7 @@ import { useProject } from "./store/projectStore";
 
 export function App() {
   const [rightTab, setRightTab] = useState<"alarms" | "json">("alarms");
+  useKeyboardShortcuts();
 
   return (
     <div className="h-full flex flex-col bg-zinc-950 text-zinc-100">
