@@ -8,6 +8,7 @@ const GAP = 8;    // gap-2 = 8px
 
 // Module-level drag state — avoids stale closures during drag events.
 let widgetDrag: { id: string; ox: number; oy: number } | null = null;
+let resizeDrag: { id: string; originX: number; originY: number; corner: "br" | "bl" | "tr" | "tl" } | null = null;
 
 function cellFromEvent(grid: HTMLElement, e: React.DragEvent) {
   const rect = grid.getBoundingClientRect();
@@ -23,10 +24,10 @@ export function Canvas() {
   const page = project.pages.find((p) => p.id === activePageId);
   if (!page) return <div className="p-6 text-zinc-500">No page selected.</div>;
 
-  // Accept both widget-move drags and tag-binding drags at the canvas level.
+  // Accept widget-move, resize, and tag-binding drags at the canvas level.
   const onDragOver = (e: React.DragEvent) => {
     const types = e.dataTransfer.types;
-    if (types.includes("text/x-widget-id") || types.includes("text/x-tag-binding")) {
+    if (types.includes("text/x-widget-id") || types.includes("text/x-tag-binding") || types.includes("text/x-resize")) {
       e.preventDefault();
     }
   };
@@ -45,6 +46,44 @@ export function Canvas() {
           row >= (w.y ?? 0) && row < (w.y ?? 0) + w.h,
       );
       if (target) updateWidget(activePageId, target.id, { binding: tagBinding });
+      return;
+    }
+
+    // Resize drop.
+    if (resizeDrag) {
+      const w = page.widgets.find((x) => x.id === resizeDrag!.id);
+      if (w) {
+        const { corner, originX, originY } = resizeDrag;
+        let nx = w.x, ny = w.y, nw = w.w, nh = w.h;
+        if (corner === "br") {
+          nw = Math.max(1, col - originX + 1);
+          nh = Math.max(1, row - originY + 1);
+        } else if (corner === "bl") {
+          const newX = Math.min(col, originX + w.w - 1);
+          nw = Math.max(1, originX + w.w - newX);
+          nx = newX;
+          nh = Math.max(1, row - originY + 1);
+        } else if (corner === "tr") {
+          nw = Math.max(1, col - originX + 1);
+          const newY = Math.min(row, originY + w.h - 1);
+          nh = Math.max(1, originY + w.h - newY);
+          ny = newY;
+        } else { // tl
+          const newX = Math.min(col, originX + w.w - 1);
+          nw = Math.max(1, originX + w.w - newX);
+          nx = newX;
+          const newY = Math.min(row, originY + w.h - 1);
+          nh = Math.max(1, originY + w.h - newY);
+          ny = newY;
+        }
+        updateWidget(activePageId, resizeDrag.id, {
+          x: Math.max(0, Math.min(COLS - nw, nx)),
+          y: Math.max(0, ny),
+          w: Math.min(COLS, nw),
+          h: Math.max(1, nh),
+        });
+      }
+      resizeDrag = null;
       return;
     }
 
@@ -112,13 +151,38 @@ export function Canvas() {
             >
               <WidgetRenderer w={w} />
               {selected && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); removeWidget(page.id, w.id); }}
-                  className="absolute -top-2 -right-2 text-[10px] px-1.5 py-0.5 rounded bg-red-600 hover:bg-red-500 z-10"
-                  style={{ cursor: "default" }}
-                >
-                  ×
-                </button>
+                <>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); removeWidget(page.id, w.id); }}
+                    className="absolute -top-2 -right-2 text-[10px] px-1.5 py-0.5 rounded bg-red-600 hover:bg-red-500 z-10"
+                    style={{ cursor: "default" }}
+                  >
+                    ×
+                  </button>
+                  {/* Resize handles at each corner */}
+                  {(["br","bl","tr","tl"] as const).map((corner) => (
+                    <div
+                      key={corner}
+                      draggable
+                      onDragStart={(e) => {
+                        e.stopPropagation();
+                        if (!gridRef.current) return;
+                        resizeDrag = { id: w.id, originX: w.x ?? 0, originY: w.y ?? 0, corner };
+                        e.dataTransfer.setData("text/x-resize", w.id);
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      className="absolute w-3 h-3 bg-blue-500 rounded-full z-20 border-2 border-zinc-900 hover:bg-blue-400"
+                      style={{
+                        cursor: corner === "br" || corner === "tl" ? "nwse-resize" : "nesw-resize",
+                        bottom: corner.startsWith("b") ? -4 : undefined,
+                        top: corner.startsWith("t") ? -4 : undefined,
+                        right: corner.endsWith("r") ? -4 : undefined,
+                        left: corner.endsWith("l") ? -4 : undefined,
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  ))}
+                </>
               )}
               {w.binding && (
                 <div className="absolute bottom-0 left-0 right-0 text-[9px] font-mono text-zinc-600 px-1.5 truncate pointer-events-none">
