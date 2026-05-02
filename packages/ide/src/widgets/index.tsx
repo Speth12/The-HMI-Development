@@ -234,21 +234,24 @@ function TextInputWidget({ w }: { w: Widget }) {
   );
 }
 
-// ── trend widget ───────────────────────────────────────────────────────────
+// ── trend widget (multi-series) ────────────────────────────────────────────
 
 type Sample = { ts: number; v: number };
+type TrendSeries = { binding: string; color: string; label?: string };
 
-function TrendWidget({ w }: { w: Widget }) {
-  const t = useTag(w.binding);
-  const duration = ((w.config?.duration as number) ?? 300) * 1000; // ms
+const SERIES_COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#06b6d4"];
+
+/** Tracks one time-series: fetches history + appends live updates. */
+function useSeries(binding: string | undefined, duration: number): Sample[] {
+  const t = useTag(binding);
   const [pts, setPts] = useState<Sample[]>([]);
   const ptsRef = useRef<Sample[]>([]);
 
-  // Fetch historical data on mount / binding change.
+  // Fetch history on mount / binding change.
   useEffect(() => {
-    if (!w.binding) { setPts([]); ptsRef.current = []; return; }
-    const from = (Date.now() - duration) * 1e6; // ns
-    fetch(`${apiBase}/api/v1/history?path=${encodeURIComponent(w.binding)}&from=${from}&limit=500`)
+    if (!binding) { setPts([]); ptsRef.current = []; return; }
+    const from = (Date.now() - duration) * 1e6;
+    fetch(`${apiBase}/api/v1/history?path=${encodeURIComponent(binding)}&from=${from}&limit=500`)
       .then((r) => (r.ok ? r.json() : []))
       .then((samples: Array<{ ts: number; value: unknown }>) => {
         const loaded: Sample[] = samples
@@ -258,7 +261,7 @@ function TrendWidget({ w }: { w: Widget }) {
         setPts([...loaded]);
       })
       .catch(() => {});
-  }, [w.binding, duration]);
+  }, [binding, duration]);
 
   // Append live values.
   useEffect(() => {
@@ -266,72 +269,97 @@ function TrendWidget({ w }: { w: Widget }) {
     const now = t.ts > 1e15 ? t.ts / 1e6 : t.ts > 0 ? t.ts : Date.now();
     const cutoff = now - duration;
     const prev = ptsRef.current;
-    // Skip if this is a duplicate timestamp.
     if (prev.length > 0 && prev[prev.length - 1]!.ts >= now) return;
     const next = [...prev.filter((p) => p.ts >= cutoff), { ts: now, v: t.value as number }];
     ptsRef.current = next;
     setPts(next);
   }, [t.value, t.ts, t.quality, duration]);
 
-  const cfgMin = w.config?.min as number | undefined;
-  const cfgMax = w.config?.max as number | undefined;
-  const vMin = cfgMin ?? (pts.length ? Math.min(...pts.map((p) => p.v)) : 0);
-  const vMax = cfgMax ?? (pts.length ? Math.max(...pts.map((p) => p.v)) : 100);
-  const vRange = vMax - vMin || 1;
+  return pts;
+}
 
-  // SVG polyline points (0–100 viewBox).
-  const svgLine = (): string => {
-    if (pts.length < 2) return "";
-    const t0 = pts[0]!.ts;
-    const t1 = pts[pts.length - 1]!.ts;
-    const span = t1 - t0 || 1;
-    return pts.map((p) => {
-      const x = ((p.ts - t0) / span) * 100;
+/** Convert a series' samples to SVG polyline points in a shared [tMin,tMax] window. */
+function toPolyline(pts: Sample[], tMin: number, tMax: number, vMin: number, vRange: number): string {
+  if (pts.length < 2) return "";
+  const tSpan = tMax - tMin || 1;
+  return pts
+    .filter((p) => p.ts >= tMin)
+    .map((p) => {
+      const x = ((p.ts - tMin) / tSpan) * 100;
       const y = 100 - ((p.v - vMin) / vRange) * 100;
       return `${x.toFixed(2)},${y.toFixed(2)}`;
-    }).join(" ");
-  };
+    })
+    .join(" ");
+}
 
-  const latest = pts.at(-1);
+function TrendWidget({ w }: { w: Widget }) {
+  const duration = ((w.config?.duration as number) ?? 300) * 1000;
 
-  // Last-point dot coords.
-  const dotCoords = (() => {
-    if (pts.length < 1) return null;
-    const p = pts[pts.length - 1]!;
-    const t0 = pts[0]!.ts;
-    const t1 = p.ts;
-    const span = t1 - t0 || 1;
-    return {
-      x: pts.length > 1 ? ((p.ts - t0) / span) * 100 : 100,
-      y: 100 - ((p.v - vMin) / vRange) * 100,
-    };
-  })();
+  // Build series list: config.tags[] for multi-series, or fall back to w.binding.
+  const cfgTags = w.config?.tags as TrendSeries[] | undefined;
+  const series: TrendSeries[] = cfgTags?.length
+    ? cfgTags
+    : w.binding
+    ? [{ binding: w.binding, color: SERIES_COLORS[0]! }]
+    : [];
+
+  // We need fixed-count hooks — support up to 6 series (pad with undefined).
+  const s0 = useSeries(series[0]?.binding, duration);
+  const s1 = useSeries(series[1]?.binding, duration);
+  const s2 = useSeries(series[2]?.binding, duration);
+  const s3 = useSeries(series[3]?.binding, duration);
+  const s4 = useSeries(series[4]?.binding, duration);
+  const s5 = useSeries(series[5]?.binding, duration);
+  const allPts = [s0, s1, s2, s3, s4, s5].slice(0, series.length);
+
+  const cfgMin = w.config?.min as number | undefined;
+  const cfgMax = w.config?.max as number | undefined;
+  const flat = allPts.flat();
+  const vMin = cfgMin ?? (flat.length ? Math.min(...flat.map((p) => p.v)) : 0);
+  const vMax = cfgMax ?? (flat.length ? Math.max(...flat.map((p) => p.v)) : 100);
+  const vRange = vMax - vMin || 1;
+
+  // Shared time window: most recent point across all series.
+  const tMax = flat.length ? Math.max(...flat.map((p) => p.ts)) : Date.now();
+  const tMin = tMax - duration;
 
   return (
     <div className="flex flex-col h-full">
-      <svg
-        className="flex-1 w-full overflow-visible"
-        viewBox="0 0 100 100"
-        preserveAspectRatio="none"
-      >
+      <svg className="flex-1 w-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
         {[0, 25, 50, 75, 100].map((y) => (
           <line key={y} x1="0" y1={y} x2="100" y2={y} stroke="#27272a" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
         ))}
-        <polyline
-          points={svgLine()}
-          fill="none"
-          stroke="#3b82f6"
-          strokeWidth="1.5"
-          vectorEffect="non-scaling-stroke"
-          strokeLinejoin="round"
-        />
-        {dotCoords && (
-          <circle cx={dotCoords.x} cy={dotCoords.y} r="2" fill="#3b82f6" vectorEffect="non-scaling-stroke" />
-        )}
+        {allPts.map((pts, i) => {
+          const color = series[i]?.color ?? SERIES_COLORS[i % SERIES_COLORS.length]!;
+          const polyPts = toPolyline(pts, tMin, tMax, vMin, vRange);
+          const last = pts.at(-1);
+          const dotX = last ? ((last.ts - tMin) / (tMax - tMin || 1)) * 100 : null;
+          const dotY = last ? 100 - ((last.v - vMin) / vRange) * 100 : null;
+          return (
+            <g key={i}>
+              <polyline points={polyPts} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+              {dotX !== null && dotY !== null && (
+                <circle cx={dotX} cy={dotY} r="2" fill={color} vectorEffect="non-scaling-stroke" />
+              )}
+            </g>
+          );
+        })}
       </svg>
-      <div className="flex justify-between text-[10px] text-zinc-600 font-mono mt-0.5 shrink-0">
+      {/* Legend + values */}
+      <div className="flex items-center justify-between text-[10px] text-zinc-600 font-mono mt-0.5 shrink-0 flex-wrap gap-x-3">
         <span>{vMin.toFixed(1)}</span>
-        <span className="text-zinc-400 font-semibold">{latest ? fmt(latest.v) : "—"}</span>
+        <div className="flex gap-2 flex-wrap">
+          {allPts.map((pts, i) => {
+            const color = series[i]?.color ?? SERIES_COLORS[i % SERIES_COLORS.length]!;
+            const latest = pts.at(-1);
+            return (
+              <span key={i} style={{ color }} className="font-semibold">
+                {series[i]?.label ? `${series[i].label}: ` : ""}
+                {latest ? fmt(latest.v) : "—"}
+              </span>
+            );
+          })}
+        </div>
         <span>{vMax.toFixed(1)}</span>
       </div>
     </div>

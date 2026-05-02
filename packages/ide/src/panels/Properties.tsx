@@ -159,6 +159,7 @@ export function Properties() {
           </div>
           <RangeEditor cfgNum={cfgNum} setConfig={setConfig} inp={inp} numInp={numInp} label={label}
             note="Leave blank for auto-scale" />
+          <TrendSeriesEditor w={w} setConfig={setConfig} inp={inp} label={label} />
         </>
       )}
 
@@ -171,6 +172,76 @@ export function Properties() {
             className={numInp} />
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Trend series editor ────────────────────────────────────────────────────
+
+const SERIES_COLORS = ["#3b82f6","#22c55e","#f59e0b","#ef4444","#a855f7","#06b6d4"];
+type TrendSeries = { binding: string; color: string; label?: string };
+
+function TrendSeriesEditor({ w, setConfig, inp, label }: {
+  w: { binding?: string; config?: Record<string, unknown> };
+  setConfig: (k: string, v: unknown) => void;
+  inp: string; label: LabelFn;
+}) {
+  const cfgTags = w.config?.tags as TrendSeries[] | undefined;
+  // If no explicit tags config, seed from the widget binding (series 0).
+  const tags: TrendSeries[] = cfgTags ?? (w.binding ? [{ binding: w.binding, color: SERIES_COLORS[0]! }] : []);
+
+  const update = (idx: number, patch: Partial<TrendSeries>) => {
+    const next = tags.map((s, i) => (i === idx ? { ...s, ...patch } : s));
+    setConfig("tags", next);
+  };
+
+  const add = () => {
+    const color = SERIES_COLORS[tags.length % SERIES_COLORS.length]!;
+    setConfig("tags", [...tags, { binding: "", color, label: "" }]);
+  };
+
+  const remove = (idx: number) => setConfig("tags", tags.filter((_, i) => i !== idx));
+
+  if (tags.length <= 1 && !cfgTags) {
+    // Single-series mode — show "add series" to switch to multi.
+    return (
+      <div>
+        {label("Multi-series")}
+        <button onClick={add} className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 w-full text-left">
+          + add second series
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        {label("Series")}
+        {tags.length < 6 && (
+          <button onClick={add} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700">+ add</button>
+        )}
+      </div>
+      <div className="space-y-2">
+        {tags.map((s, i) => (
+          <div key={i} className="border border-zinc-700/50 rounded p-2 space-y-1.5">
+            <div className="flex items-center gap-1">
+              <input type="color" value={s.color}
+                onChange={(e) => update(i, { color: e.target.value })}
+                className="h-6 w-8 rounded border border-zinc-700 bg-zinc-900 cursor-pointer shrink-0" />
+              <input value={s.label ?? ""} placeholder="label"
+                onChange={(e) => update(i, { label: e.target.value })}
+                className={`${inp} flex-1`} />
+              {tags.length > 1 && (
+                <button onClick={() => remove(i)} className="text-zinc-600 hover:text-red-400 text-xs shrink-0">×</button>
+              )}
+            </div>
+            <input value={s.binding} placeholder="ds:tagPath"
+              onChange={(e) => update(i, { binding: e.target.value })}
+              className={`${inp} font-mono text-[10px]`} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

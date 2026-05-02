@@ -234,62 +234,61 @@ function TextInputWidget({ w }: { w: Widget }) {
 // ── Trend ──────────────────────────────────────────────────────────────────
 
 type Sample = { ts: number; v: number };
+type TrendSeries = { binding: string; color: string; label?: string };
+const SERIES_COLORS = ["#3b82f6","#22c55e","#f59e0b","#ef4444","#a855f7","#06b6d4"];
 
-function TrendWidget({ w }: { w: Widget }) {
-  const t = useTag(w.binding);
-  const duration = ((w.config?.duration as number) ?? 300) * 1000;
+function useSeries(binding: string | undefined, duration: number): Sample[] {
+  const t = useTag(binding);
   const [pts, setPts] = useState<Sample[]>([]);
   const ptsRef = useRef<Sample[]>([]);
-
   useEffect(() => {
-    if (!w.binding) { setPts([]); ptsRef.current = []; return; }
+    if (!binding) { setPts([]); ptsRef.current = []; return; }
     const from = (Date.now() - duration) * 1e6;
-    fetch(`/api/v1/history?path=${encodeURIComponent(w.binding)}&from=${from}&limit=500`)
+    fetch(`/api/v1/history?path=${encodeURIComponent(binding)}&from=${from}&limit=500`)
       .then((r) => (r.ok ? r.json() : []))
       .then((samples: Array<{ ts: number; value: unknown }>) => {
-        const loaded: Sample[] = samples
-          .filter((s) => typeof s.value === "number")
+        const loaded: Sample[] = samples.filter((s) => typeof s.value === "number")
           .map((s) => ({ ts: s.ts > 1e15 ? s.ts / 1e6 : s.ts, v: s.value as number }));
-        ptsRef.current = loaded;
-        setPts([...loaded]);
-      })
-      .catch(() => {});
-  }, [w.binding, duration]);
-
+        ptsRef.current = loaded; setPts([...loaded]);
+      }).catch(() => {});
+  }, [binding, duration]);
   useEffect(() => {
     if (typeof t.value !== "number" || t.quality === "Unknown") return;
     const now = t.ts > 1e15 ? t.ts / 1e6 : t.ts > 0 ? t.ts : Date.now();
-    const cutoff = now - duration;
     const prev = ptsRef.current;
     if (prev.length > 0 && prev[prev.length - 1]!.ts >= now) return;
-    const next = [...prev.filter((p) => p.ts >= cutoff), { ts: now, v: t.value as number }];
-    ptsRef.current = next;
-    setPts(next);
+    const next = [...prev.filter((p) => p.ts >= now - duration), { ts: now, v: t.value as number }];
+    ptsRef.current = next; setPts(next);
   }, [t.value, t.ts, t.quality, duration]);
+  return pts;
+}
 
-  const cfgMin  = w.config?.min as number | undefined;
-  const cfgMax  = w.config?.max as number | undefined;
-  const vMin    = cfgMin ?? (pts.length ? Math.min(...pts.map((p) => p.v)) : 0);
-  const vMax    = cfgMax ?? (pts.length ? Math.max(...pts.map((p) => p.v)) : 100);
-  const vRange  = vMax - vMin || 1;
-  const latest  = pts.at(-1);
+function TrendWidget({ w }: { w: Widget }) {
+  const duration = ((w.config?.duration as number) ?? 300) * 1000;
+  const cfgTags = w.config?.tags as TrendSeries[] | undefined;
+  const series: TrendSeries[] = cfgTags?.length ? cfgTags
+    : w.binding ? [{ binding: w.binding, color: SERIES_COLORS[0]! }] : [];
 
-  const svgLine = (): string => {
-    if (pts.length < 2) return "";
-    const t0 = pts[0]!.ts, t1 = pts[pts.length - 1]!.ts, span = t1 - t0 || 1;
-    return pts.map((p) => {
-      const x = ((p.ts - t0) / span) * 100;
-      const y = 100 - ((p.v - vMin) / vRange) * 100;
-      return `${x.toFixed(2)},${y.toFixed(2)}`;
-    }).join(" ");
-  };
+  const s0 = useSeries(series[0]?.binding, duration);
+  const s1 = useSeries(series[1]?.binding, duration);
+  const s2 = useSeries(series[2]?.binding, duration);
+  const s3 = useSeries(series[3]?.binding, duration);
+  const s4 = useSeries(series[4]?.binding, duration);
+  const s5 = useSeries(series[5]?.binding, duration);
+  const allPts = [s0,s1,s2,s3,s4,s5].slice(0, series.length);
+  const flat = allPts.flat();
 
-  const dotCoords = (() => {
-    if (!pts.length) return null;
-    const p = pts[pts.length - 1]!;
-    const t0 = pts[0]!.ts, span = p.ts - t0 || 1;
-    return { x: pts.length > 1 ? ((p.ts - t0) / span) * 100 : 100, y: 100 - ((p.v - vMin) / vRange) * 100 };
-  })();
+  const cfgMin = w.config?.min as number | undefined;
+  const cfgMax = w.config?.max as number | undefined;
+  const vMin = cfgMin ?? (flat.length ? Math.min(...flat.map((p) => p.v)) : 0);
+  const vMax = cfgMax ?? (flat.length ? Math.max(...flat.map((p) => p.v)) : 100);
+  const vRange = vMax - vMin || 1;
+  const tMax = flat.length ? Math.max(...flat.map((p) => p.ts)) : Date.now();
+  const tMin = tMax - duration;
+  const tSpan = tMax - tMin || 1;
+
+  const toLine = (pts: Sample[]) => pts.length < 2 ? "" : pts.filter((p) => p.ts >= tMin)
+    .map((p) => `${(((p.ts-tMin)/tSpan)*100).toFixed(2)},${(100-((p.v-vMin)/vRange)*100).toFixed(2)}`).join(" ");
 
   return (
     <div className="flex flex-col h-full">
@@ -297,12 +296,26 @@ function TrendWidget({ w }: { w: Widget }) {
         {[0,25,50,75,100].map((y) => (
           <line key={y} x1="0" y1={y} x2="100" y2={y} stroke="#27272a" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
         ))}
-        <polyline points={svgLine()} fill="none" stroke="#3b82f6" strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
-        {dotCoords && <circle cx={dotCoords.x} cy={dotCoords.y} r="2" fill="#3b82f6" vectorEffect="non-scaling-stroke" />}
+        {allPts.map((pts, i) => {
+          const color = series[i]?.color ?? SERIES_COLORS[i % SERIES_COLORS.length]!;
+          const last = pts.at(-1);
+          return (
+            <g key={i}>
+              <polyline points={toLine(pts)} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+              {last && <circle cx={(((last.ts-tMin)/tSpan)*100)} cy={(100-((last.v-vMin)/vRange)*100)} r="2" fill={color} vectorEffect="non-scaling-stroke" />}
+            </g>
+          );
+        })}
       </svg>
-      <div className="flex justify-between text-[10px] text-zinc-600 font-mono mt-0.5 shrink-0">
+      <div className="flex items-center justify-between text-[10px] text-zinc-600 font-mono mt-0.5 shrink-0 gap-2 flex-wrap">
         <span>{vMin.toFixed(1)}</span>
-        <span className="text-zinc-400 font-semibold">{latest ? fmt(latest.v) : "—"}</span>
+        <div className="flex gap-2 flex-wrap">
+          {allPts.map((pts, i) => {
+            const color = series[i]?.color ?? SERIES_COLORS[i % SERIES_COLORS.length]!;
+            const last = pts.at(-1);
+            return <span key={i} style={{ color }} className="font-semibold">{series[i]?.label ? `${series[i].label}: ` : ""}{last ? fmt(last.v) : "—"}</span>;
+          })}
+        </div>
         <span>{vMax.toFixed(1)}</span>
       </div>
     </div>
