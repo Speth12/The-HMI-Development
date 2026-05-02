@@ -5,7 +5,8 @@ import { useTag } from "../hooks/useTag";
 
 export type WidgetType =
   | "gauge" | "trend" | "led" | "button" | "numericInput"
-  | "numericDisplay" | "textInput" | "textDisplay" | "historyLog";
+  | "numericDisplay" | "textInput" | "textDisplay" | "historyLog"
+  | "tank" | "setpoint";
 
 export type Widget = {
   id: string;
@@ -118,6 +119,38 @@ function LEDWidget({ w }: { w: Widget }) {
       />
       <div className="text-sm font-medium">
         {on ? (w.config?.trueLabel as string ?? "ON") : (w.config?.falseLabel as string ?? "OFF")}
+      </div>
+    </div>
+  );
+}
+
+// ── Tank (vertical level) ─────────────────────────────────────────────────
+
+function TankWidget({ w }: { w: Widget }) {
+  const t = useTag(w.binding);
+  const min = (w.config?.min as number) ?? 0;
+  const max = (w.config?.max as number) ?? 100;
+  const v = typeof t.value === "number" ? t.value : 0;
+  const pct = Math.max(0, Math.min(100, ((v - min) / (max - min)) * 100));
+  const thresholds = (w.config?.thresholds as Array<{ value: number; color: string }>) ?? [];
+  let fillColor = "#3b82f6";
+  thresholds.forEach((th) => { if (v >= th.value) fillColor = th.color; });
+  return (
+    <div className="flex gap-3 h-full items-end">
+      <div className="flex flex-col w-10 h-full bg-zinc-800 rounded-md overflow-hidden relative border border-zinc-700">
+        {[75, 50, 25].map((p) => (
+          <div key={p} className="absolute left-0 right-0 border-t border-zinc-600/50"
+            style={{ bottom: `${p}%` }} />
+        ))}
+        <div
+          className="absolute bottom-0 left-0 right-0 rounded-b-md transition-all duration-500"
+          style={{ height: `${pct}%`, background: fillColor, opacity: 0.85 }}
+        />
+      </div>
+      <div className="flex flex-col justify-end pb-1">
+        <div className="text-xl font-semibold tabular-nums leading-none">{fmt(t.value)}</div>
+        {(w.config?.unit as string | undefined) && <div className="text-[10px] text-zinc-500">{w.config!.unit as string}</div>}
+        <div className={`text-[9px] mt-1 ${qualityColor[t.quality] ?? "text-zinc-500"}`}>{t.quality}</div>
       </div>
     </div>
   );
@@ -344,6 +377,43 @@ function HistoryLogWidget({ w }: { w: Widget }) {
   );
 }
 
+// ── Setpoint slider ────────────────────────────────────────────────────────
+
+function SetpointWidget({ w }: { w: Widget }) {
+  const t = useTag(w.binding);
+  const min = (w.config?.min as number) ?? 0;
+  const max = (w.config?.max as number) ?? 100;
+  const step = (w.config?.step as number) ?? 1;
+  const [draft, setDraft] = useState<number | null>(null);
+  const displayVal = draft ?? (typeof t.value === "number" ? t.value : min);
+
+  const commit = (n: number) => {
+    setDraft(null);
+    if (w.binding) writeTag(w.binding, n);
+  };
+
+  return (
+    <div className="flex flex-col h-full justify-center gap-2">
+      <div className="flex items-baseline gap-1">
+        <span className="text-2xl font-semibold tabular-nums">{displayVal.toFixed(step < 1 ? 1 : 0)}</span>
+        {(w.config?.unit as string | undefined) && <span className="text-xs text-zinc-500">{w.config!.unit as string}</span>}
+      </div>
+      <input
+        type="range" min={min} max={max} step={step} value={displayVal}
+        onChange={(e) => setDraft(Number(e.target.value))}
+        onMouseUp={(e) => commit(Number((e.target as HTMLInputElement).value))}
+        onTouchEnd={(e) => commit(Number((e.target as HTMLInputElement).value))}
+        className="w-full accent-blue-500 cursor-pointer"
+      />
+      <div className="flex justify-between text-[9px] text-zinc-600">
+        <span>{min}</span>
+        <span className={qualityColor[t.quality] ?? "text-zinc-600"}>{t.quality}</span>
+        <span>{max}</span>
+      </div>
+    </div>
+  );
+}
+
 // ── Registry ───────────────────────────────────────────────────────────────
 
 const renderers: Record<string, React.ComponentType<{ w: Widget }>> = {
@@ -351,7 +421,9 @@ const renderers: Record<string, React.ComponentType<{ w: Widget }>> = {
   numericDisplay: NumericDisplayWidget,
   textDisplay:    TextDisplayWidget,
   led:            LEDWidget,
+  tank:           TankWidget,
   button:         ButtonWidget,
+  setpoint:       SetpointWidget,
   trend:          TrendWidget,
   numericInput:   NumericInputWidget,
   textInput:      TextInputWidget,

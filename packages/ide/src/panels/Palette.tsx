@@ -1,15 +1,17 @@
 import { newWidgetId, useProject, type WidgetType } from "../store/projectStore";
 
 const items: { type: WidgetType; label: string; w: number; h: number }[] = [
-  { type: "gauge", label: "Gauge", w: 4, h: 3 },
-  { type: "numericDisplay", label: "Numeric", w: 3, h: 2 },
-  { type: "textDisplay", label: "Text", w: 4, h: 2 },
-  { type: "led", label: "LED", w: 2, h: 2 },
-  { type: "button", label: "Button", w: 3, h: 2 },
-  { type: "trend", label: "Trend", w: 6, h: 4 },
-  { type: "numericInput", label: "Numeric In", w: 3, h: 2 },
-  { type: "textInput", label: "Text In", w: 3, h: 2 },
-  { type: "historyLog", label: "History", w: 6, h: 4 },
+  { type: "gauge",          label: "Gauge",      w: 4, h: 3 },
+  { type: "numericDisplay", label: "Numeric",    w: 3, h: 2 },
+  { type: "textDisplay",    label: "Text",       w: 4, h: 2 },
+  { type: "led",            label: "LED",        w: 2, h: 2 },
+  { type: "tank",           label: "Tank",       w: 2, h: 4 },
+  { type: "button",         label: "Button",     w: 3, h: 2 },
+  { type: "setpoint",       label: "Setpoint",   w: 4, h: 2 },
+  { type: "trend",          label: "Trend",      w: 6, h: 4 },
+  { type: "numericInput",   label: "Numeric In", w: 3, h: 2 },
+  { type: "textInput",      label: "Text In",    w: 3, h: 2 },
+  { type: "historyLog",     label: "History",    w: 6, h: 4 },
 ];
 
 export function Palette() {

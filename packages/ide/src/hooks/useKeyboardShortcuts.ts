@@ -5,7 +5,7 @@ import { useProject, type Widget } from "../store/projectStore";
 import { newWidgetId } from "../store/projectStore";
 
 export function useKeyboardShortcuts() {
-  const { activePageId, selectedWidgetId, selectWidget, removeWidget, addWidget, project, exportJSON } = useProject();
+  const { activePageId, selectedWidgetId, selectWidget, removeWidget, addWidget, project, exportJSON, undo, redo } = useProject();
   const clipboard = useRef<Widget | null>(null);
 
   useEffect(() => {
@@ -23,6 +23,20 @@ export function useKeyboardShortcuts() {
       // Escape — deselect
       if (e.key === "Escape") {
         selectWidget(null);
+        return;
+      }
+
+      // Ctrl/Cmd+Z — undo
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+
+      // Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z — redo
+      if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
+        e.preventDefault();
+        redo();
         return;
       }
 
@@ -72,5 +86,5 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activePageId, selectedWidgetId, project, exportJSON, selectWidget, removeWidget, addWidget]);
+  }, [activePageId, selectedWidgetId, project, exportJSON, selectWidget, removeWidget, addWidget, undo, redo]);
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useProject, type DatasourceType } from "../store/projectStore";
+import { useShallow } from "zustand/react/shallow";
 import { setApiBase } from "../store/runtimeTarget";
 import { tagStoreClient } from "../store/tagStoreClient";
 
@@ -10,6 +11,9 @@ const runtimeBase = (target: string) =>
 
 export function Header() {
   const { project, addDatasource, removeDatasource, exportJSON, loadProject } = useProject();
+  const { canUndo, canRedo, undo, redo } = useProject(
+    useShallow((s) => ({ canUndo: s.canUndo, canRedo: s.canRedo, undo: s.undo, redo: s.redo }))
+  );
   const [showAddDS, setShowAddDS] = useState(false);
   const [busy, setBusy] = useState<"none" | "deploy" | "load">("none");
   const [msg, setMsg] = useState("");
@@ -158,6 +162,12 @@ export function Header() {
       >
         ⬡ Preview
       </button>
+
+      {/* Undo / Redo */}
+      <button onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)"
+        className="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 font-mono">↩</button>
+      <button onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Y)"
+        className="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 font-mono">↪</button>
 
       {/* File save / load */}
       <button onClick={saveToFile} title="Save project to .xhmi.json file"

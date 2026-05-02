@@ -173,6 +173,29 @@ export function Properties() {
         </>
       )}
 
+      {/* ── Tank ─────────────────────────────────────────────────────── */}
+      {w.type === "tank" && (
+        <>
+          <RangeEditor cfgNum={cfgNum} setConfig={setConfig} inp={inp} numInp={numInp} label={label} />
+          <UnitEditor cfgStr={cfgStr} setConfig={setConfig} inp={inp} label={label} />
+          <ThresholdEditor w={w} setConfig={setConfig} inp={inp} numInp={numInp} label={label} />
+        </>
+      )}
+
+      {/* ── Setpoint slider ───────────────────────────────────────────── */}
+      {w.type === "setpoint" && (
+        <>
+          <RangeEditor cfgNum={cfgNum} setConfig={setConfig} inp={inp} numInp={numInp} label={label} />
+          <UnitEditor cfgStr={cfgStr} setConfig={setConfig} inp={inp} label={label} />
+          <div>
+            {label("Step")}
+            <input type="number" min={0.01} step={0.1} value={cfgNum("step", 1)}
+              onChange={(e) => setConfig("step", Number(e.target.value))}
+              className={numInp} />
+          </div>
+        </>
+      )}
+
       {/* ── Trend ────────────────────────────────────────────────────── */}
       {w.type === "trend" && (
         <>

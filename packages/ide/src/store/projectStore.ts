@@ -3,7 +3,8 @@ import { create } from "zustand";
 
 export type WidgetType =
   | "gauge" | "trend" | "led" | "button" | "numericInput"
-  | "numericDisplay" | "textInput" | "textDisplay" | "historyLog";
+  | "numericDisplay" | "textInput" | "textDisplay" | "historyLog"
+  | "tank" | "setpoint";
 
 export type Widget = {
   id: string;
@@ -44,10 +45,20 @@ export type Project = {
   alarmRules?: AlarmRule[];
 };
 
+const MAX_HISTORY = 50;
+
 type State = {
   project: Project;
   activePageId: string;
   selectedWidgetId: string | null;
+
+  // Undo/redo stacks (editor-only, not serialised)
+  _past: Project[];
+  _future: Project[];
+  canUndo: boolean;
+  canRedo: boolean;
+  undo: () => void;
+  redo: () => void;
 
   setActivePage: (id: string) => void;
   selectWidget: (id: string | null) => void;
@@ -80,102 +91,185 @@ const blankProject = (): Project => ({
 const uid = (prefix: string) =>
   `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
 
-export const useProject = create<State>((set, get) => ({
-  project: blankProject(),
-  activePageId: "p1",
-  selectedWidgetId: null,
+/** Deep-clone a project so history snapshots are independent. */
+const cloneProject = (p: Project): Project => JSON.parse(JSON.stringify(p)) as Project;
 
-  setActivePage: (id) => set({ activePageId: id, selectedWidgetId: null }),
-  selectWidget: (id) => set({ selectedWidgetId: id }),
+export const useProject = create<State>((set, get) => {
+  /** Save current project to undo stack before a mutation. */
+  const pushHistory = () => {
+    const s = get();
+    const past = [...s._past, cloneProject(s.project)].slice(-MAX_HISTORY);
+    set({ _past: past, _future: [], canUndo: true, canRedo: false });
+  };
 
-  addPage: (name) =>
-    set((s) => {
-      const id = uid("page");
-      const page: Page = { id, name: name || `Page ${s.project.pages.length + 1}`, widgets: [] };
-      return { project: { ...s.project, pages: [...s.project.pages, page] }, activePageId: id };
-    }),
+  return {
+    project: blankProject(),
+    activePageId: "p1",
+    selectedWidgetId: null,
+    _past: [],
+    _future: [],
+    canUndo: false,
+    canRedo: false,
 
-  renamePage: (id, name) =>
-    set((s) => ({
-      project: {
-        ...s.project,
-        pages: s.project.pages.map((p) => (p.id === id ? { ...p, name } : p)),
-      },
-    })),
+    undo: () => {
+      const s = get();
+      if (s._past.length === 0) return;
+      const past = [...s._past];
+      const restored = past.pop()!;
+      const future = [cloneProject(s.project), ...s._future].slice(0, MAX_HISTORY);
+      set({
+        project: restored,
+        _past: past,
+        _future: future,
+        canUndo: past.length > 0,
+        canRedo: true,
+        selectedWidgetId: null,
+      });
+    },
 
-  removePage: (id) =>
-    set((s) => {
-      const pages = s.project.pages.filter((p) => p.id !== id);
-      return {
-        project: { ...s.project, pages: pages.length ? pages : blankProject().pages },
-        activePageId: pages[0]?.id ?? "p1",
-      };
-    }),
+    redo: () => {
+      const s = get();
+      if (s._future.length === 0) return;
+      const future = [...s._future];
+      const restored = future.shift()!;
+      const past = [...s._past, cloneProject(s.project)].slice(-MAX_HISTORY);
+      set({
+        project: restored,
+        _past: past,
+        _future: future,
+        canUndo: true,
+        canRedo: future.length > 0,
+        selectedWidgetId: null,
+      });
+    },
 
-  addDatasource: (ds) =>
-    set((s) => ({ project: { ...s.project, datasources: [...s.project.datasources, ds] } })),
+    setActivePage: (id) => set({ activePageId: id, selectedWidgetId: null }),
+    selectWidget: (id) => set({ selectedWidgetId: id }),
 
-  removeDatasource: (id) =>
-    set((s) => ({
-      project: { ...s.project, datasources: s.project.datasources.filter((d) => d.id !== id) },
-    })),
+    addPage: (name) => {
+      pushHistory();
+      set((s) => {
+        const id = uid("page");
+        const page: Page = { id, name: name || `Page ${s.project.pages.length + 1}`, widgets: [] };
+        return { project: { ...s.project, pages: [...s.project.pages, page] }, activePageId: id };
+      });
+    },
 
-  addWidget: (pageId, w) =>
-    set((s) => ({
-      project: {
-        ...s.project,
-        pages: s.project.pages.map((p) =>
-          p.id === pageId ? { ...p, widgets: [...p.widgets, w] } : p,
-        ),
-      },
-      selectedWidgetId: w.id,
-    })),
+    renamePage: (id, name) => {
+      pushHistory();
+      set((s) => ({
+        project: {
+          ...s.project,
+          pages: s.project.pages.map((p) => (p.id === id ? { ...p, name } : p)),
+        },
+      }));
+    },
 
-  updateWidget: (pageId, id, patch) =>
-    set((s) => ({
-      project: {
-        ...s.project,
-        pages: s.project.pages.map((p) =>
-          p.id !== pageId
-            ? p
-            : { ...p, widgets: p.widgets.map((w) => (w.id === id ? { ...w, ...patch } : w)) },
-        ),
-      },
-    })),
+    removePage: (id) => {
+      pushHistory();
+      set((s) => {
+        const pages = s.project.pages.filter((p) => p.id !== id);
+        return {
+          project: { ...s.project, pages: pages.length ? pages : blankProject().pages },
+          activePageId: pages[0]?.id ?? "p1",
+        };
+      });
+    },
 
-  removeWidget: (pageId, id) =>
-    set((s) => ({
-      project: {
-        ...s.project,
-        pages: s.project.pages.map((p) =>
-          p.id === pageId ? { ...p, widgets: p.widgets.filter((w) => w.id !== id) } : p,
-        ),
-      },
-      selectedWidgetId: null,
-    })),
+    addDatasource: (ds) => {
+      pushHistory();
+      set((s) => ({ project: { ...s.project, datasources: [...s.project.datasources, ds] } }));
+    },
 
-  addAlarmRule: (rule) =>
-    set((s) => ({ project: { ...s.project, alarmRules: [...(s.project.alarmRules ?? []), rule] } })),
+    removeDatasource: (id) => {
+      pushHistory();
+      set((s) => ({
+        project: { ...s.project, datasources: s.project.datasources.filter((d) => d.id !== id) },
+      }));
+    },
 
-  updateAlarmRule: (id, patch) =>
-    set((s) => ({
-      project: {
-        ...s.project,
-        alarmRules: (s.project.alarmRules ?? []).map((r) => (r.id === id ? { ...r, ...patch } : r)),
-      },
-    })),
+    addWidget: (pageId, w) => {
+      pushHistory();
+      set((s) => ({
+        project: {
+          ...s.project,
+          pages: s.project.pages.map((p) =>
+            p.id === pageId ? { ...p, widgets: [...p.widgets, w] } : p,
+          ),
+        },
+        selectedWidgetId: w.id,
+      }));
+    },
 
-  removeAlarmRule: (id) =>
-    set((s) => ({
-      project: {
-        ...s.project,
-        alarmRules: (s.project.alarmRules ?? []).filter((r) => r.id !== id),
-      },
-    })),
+    updateWidget: (pageId, id, patch) => {
+      pushHistory();
+      set((s) => ({
+        project: {
+          ...s.project,
+          pages: s.project.pages.map((p) =>
+            p.id !== pageId
+              ? p
+              : { ...p, widgets: p.widgets.map((w) => (w.id === id ? { ...w, ...patch } : w)) },
+          ),
+        },
+      }));
+    },
 
-  loadProject: (p) => set({ project: p, activePageId: p.pages[0]?.id ?? "p1", selectedWidgetId: null }),
+    removeWidget: (pageId, id) => {
+      pushHistory();
+      set((s) => ({
+        project: {
+          ...s.project,
+          pages: s.project.pages.map((p) =>
+            p.id === pageId ? { ...p, widgets: p.widgets.filter((w) => w.id !== id) } : p,
+          ),
+        },
+        selectedWidgetId: null,
+      }));
+    },
 
-  exportJSON: () => JSON.stringify(get().project, null, 2),
-}));
+    addAlarmRule: (rule) => {
+      pushHistory();
+      set((s) => ({ project: { ...s.project, alarmRules: [...(s.project.alarmRules ?? []), rule] } }));
+    },
+
+    updateAlarmRule: (id, patch) => {
+      pushHistory();
+      set((s) => ({
+        project: {
+          ...s.project,
+          alarmRules: (s.project.alarmRules ?? []).map((r) => (r.id === id ? { ...r, ...patch } : r)),
+        },
+      }));
+    },
+
+    removeAlarmRule: (id) => {
+      pushHistory();
+      set((s) => ({
+        project: {
+          ...s.project,
+          alarmRules: (s.project.alarmRules ?? []).filter((r) => r.id !== id),
+        },
+      }));
+    },
+
+    loadProject: (p) =>
+      set({
+        project: p,
+        activePageId: p.pages[0]?.id ?? "p1",
+        selectedWidgetId: null,
+        _past: [],
+        _future: [],
+        canUndo: false,
+        canRedo: false,
+      }),
+
+    exportJSON: () => {
+      // Exclude internal undo state from export.
+      const { project } = get();
+      return JSON.stringify(project, null, 2);
+    },
+  };
+});
 
 export const newWidgetId = () => uid("w");
