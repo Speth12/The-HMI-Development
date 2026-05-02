@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useProject, type DatasourceType } from "../store/projectStore";
 import { setApiBase } from "../store/runtimeTarget";
 import { tagStoreClient } from "../store/tagStoreClient";
@@ -13,6 +13,7 @@ export function Header() {
   const [showAddDS, setShowAddDS] = useState(false);
   const [busy, setBusy] = useState<"none" | "deploy" | "load">("none");
   const [msg, setMsg] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [target, setTarget] = useState(storedTarget);
 
   // Sync the module-level API base on first render so tagStoreClient and
@@ -51,6 +52,35 @@ export function Header() {
     }
   };
 
+  const saveToFile = () => {
+    const blob = new Blob([exportJSON()], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(project.name ?? "project").replace(/\s+/g, "-")}.xhmi.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setMsg("saved to file");
+  };
+
+  const loadFromFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const p = JSON.parse(reader.result as string);
+        loadProject(p);
+        setMsg(`loaded ${file.name}`);
+      } catch {
+        setMsg("invalid project file");
+      }
+    };
+    reader.readAsText(file);
+    // Reset so the same file can be reloaded.
+    e.target.value = "";
+  };
+
   const loadFromRuntime = async () => {
     setBusy("load");
     try {
@@ -69,6 +99,17 @@ export function Header() {
   return (
     <div className="flex items-center gap-3 px-4 py-2 border-b border-zinc-800 bg-zinc-900/50">
       <div className="font-semibold text-sm">X-HMI <span className="text-zinc-500 font-normal">IDE</span></div>
+
+      {/* Project name */}
+      <input
+        value={project.name ?? ""}
+        onChange={(e) => {
+          const p = JSON.parse(exportJSON());
+          loadProject({ ...p, name: e.target.value || undefined });
+        }}
+        placeholder="Untitled"
+        className="text-xs bg-transparent border-b border-zinc-700 px-1 py-0.5 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-28"
+      />
 
       <div className="flex items-center gap-2">
         {project.datasources.map((d) => (
@@ -108,6 +149,14 @@ export function Header() {
       </div>
 
       {msg && <span className="text-[11px] text-zinc-400 max-w-xs truncate">{msg}</span>}
+
+      {/* File save / load */}
+      <button onClick={saveToFile} title="Save project to .xhmi.json file"
+        className="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700" >↓ Save</button>
+      <button onClick={() => fileInputRef.current?.click()} title="Load project from .xhmi.json file"
+        className="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700">↑ Load</button>
+      <input ref={fileInputRef} type="file" accept=".json,.xhmi.json" className="hidden" onChange={loadFromFile} />
+
       <button onClick={loadFromRuntime} disabled={busy !== "none"} className="text-xs px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50">{busy === "load" ? "…" : "Pull"}</button>
       <button onClick={deploy} disabled={busy !== "none"} className="text-xs px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 font-medium">{busy === "deploy" ? "deploying…" : "Deploy"}</button>
 
