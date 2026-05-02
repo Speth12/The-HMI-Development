@@ -150,6 +150,15 @@ export function Header() {
 
       {msg && <span className="text-[11px] text-zinc-400 max-w-xs truncate">{msg}</span>}
 
+      {/* Preview operator panel */}
+      <button
+        onClick={() => window.open(apiBase || window.location.origin, "_blank")}
+        title="Open operator panel in new tab"
+        className="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
+      >
+        ⬡ Preview
+      </button>
+
       {/* File save / load */}
       <button onClick={saveToFile} title="Save project to .xhmi.json file"
         className="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700" >↓ Save</button>

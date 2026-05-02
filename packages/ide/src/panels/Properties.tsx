@@ -1,5 +1,29 @@
 import { useProject } from "../store/projectStore";
+import { useTag } from "../hooks/useTag";
 import { PositionEditor } from "./Canvas";
+
+const qualityColor: Record<string, string> = {
+  Good: "text-emerald-400", Bad: "text-red-400", Uncertain: "text-amber-400",
+  Unknown: "text-zinc-600", Write: "text-purple-400",
+};
+
+const fmt = (v: unknown): string => {
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "number") return Number.isInteger(v) ? `${v}` : v.toFixed(3);
+  if (typeof v === "boolean") return v ? "true" : "false";
+  return String(v);
+};
+
+function LiveTagPreview({ binding }: { binding?: string }) {
+  const t = useTag(binding);
+  if (!binding) return null;
+  return (
+    <div className="flex items-center gap-2 mt-1 px-2 py-1.5 rounded bg-zinc-950/60 border border-zinc-800">
+      <span className="text-xs font-mono font-semibold text-zinc-200">{fmt(t.value)}</span>
+      <span className={`text-[10px] ml-auto ${qualityColor[t.quality] ?? "text-zinc-600"}`}>{t.quality}</span>
+    </div>
+  );
+}
 
 export function Properties() {
   const { project, activePageId, selectedWidgetId, updateWidget } = useProject();
@@ -34,7 +58,7 @@ export function Properties() {
         <div className="text-[10px] text-zinc-600 font-mono">{w.id}</div>
       </div>
 
-      {/* Binding */}
+      {/* Binding + live value */}
       <div>
         <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Binding</div>
         <input
@@ -44,6 +68,7 @@ export function Properties() {
           className={`${inp} font-mono`}
         />
         <div className="text-[10px] text-zinc-600 mt-0.5">Drag tag from browser → widget</div>
+        <LiveTagPreview binding={w.binding} />
       </div>
 
       {/* Layout */}
