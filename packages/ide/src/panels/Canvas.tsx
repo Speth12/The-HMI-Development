@@ -4,9 +4,9 @@ import { WidgetRenderer } from "../widgets";
 
 const COLS = 12;
 const ROW_H = 64; // px per grid row
-const GAP = 8;    // gap-2 = 0.5rem = 8px
+const GAP = 8;    // gap-2 = 8px
 
-// Module-level drag state — avoids stale closure issues during drag events.
+// Module-level drag state — avoids stale closures during drag events.
 let widgetDrag: { id: string; ox: number; oy: number } | null = null;
 
 function cellFromEvent(grid: HTMLElement, e: React.DragEvent) {
@@ -23,33 +23,49 @@ export function Canvas() {
   const page = project.pages.find((p) => p.id === activePageId);
   if (!page) return <div className="p-6 text-zinc-500">No page selected.</div>;
 
-  // Canvas receives drops of moved widgets.
-  const onGridDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes("text/x-widget-id")) {
+  // Accept both widget-move drags and tag-binding drags at the canvas level.
+  const onDragOver = (e: React.DragEvent) => {
+    const types = e.dataTransfer.types;
+    if (types.includes("text/x-widget-id") || types.includes("text/x-tag-binding")) {
       e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
     }
   };
 
-  const onGridDrop = (e: React.DragEvent) => {
-    if (!widgetDrag || !gridRef.current) return;
+  const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
+    if (!gridRef.current) return;
     const { col, row } = cellFromEvent(gridRef.current, e);
-    const w = page.widgets.find((x) => x.id === widgetDrag!.id);
-    if (w) {
-      updateWidget(activePageId, widgetDrag.id, {
-        x: Math.max(0, Math.min(COLS - w.w, col - widgetDrag.ox)),
-        y: Math.max(0, row - widgetDrag.oy),
-      });
+
+    // Tag binding: find the widget at the drop cell and bind it.
+    const tagBinding = e.dataTransfer.getData("text/x-tag-binding");
+    if (tagBinding) {
+      const target = page.widgets.find(
+        (w) =>
+          col >= (w.x ?? 0) && col < (w.x ?? 0) + w.w &&
+          row >= (w.y ?? 0) && row < (w.y ?? 0) + w.h,
+      );
+      if (target) updateWidget(activePageId, target.id, { binding: tagBinding });
+      return;
     }
-    widgetDrag = null;
+
+    // Widget move: update the widget's grid position.
+    if (widgetDrag) {
+      const w = page.widgets.find((x) => x.id === widgetDrag!.id);
+      if (w) {
+        updateWidget(activePageId, widgetDrag.id, {
+          x: Math.max(0, Math.min(COLS - w.w, col - widgetDrag.ox)),
+          y: Math.max(0, row - widgetDrag.oy),
+        });
+      }
+      widgetDrag = null;
+    }
   };
 
   return (
     <div
       className="flex-1 overflow-auto p-6 bg-zinc-950"
-      onDragOver={onGridDragOver}
-      onDrop={onGridDrop}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
     >
       <div
         ref={gridRef}
@@ -64,7 +80,12 @@ export function Canvas() {
           const selected = selectedWidgetId === w.id;
 
           const onDragStart = (e: React.DragEvent) => {
-            e.stopPropagation();
+            // Prevent drag-start from interactive children (inputs, buttons).
+            const tag = (e.target as HTMLElement).tagName;
+            if (tag === "INPUT" || tag === "BUTTON" || tag === "TEXTAREA") {
+              e.preventDefault();
+              return;
+            }
             if (!gridRef.current) return;
             const { col, row } = cellFromEvent(gridRef.current, e);
             widgetDrag = { id: w.id, ox: col - (w.x ?? 0), oy: row - (w.y ?? 0) };
@@ -72,38 +93,21 @@ export function Canvas() {
             e.dataTransfer.effectAllowed = "move";
           };
 
-          // Widget itself is a drop target for tag bindings.
-          const onDragOver = (e: React.DragEvent) => {
-            if (e.dataTransfer.types.includes("text/x-tag-binding")) {
-              e.preventDefault();
-              e.stopPropagation();
-              e.dataTransfer.dropEffect = "link";
-            }
-          };
-
-          const onDrop = (e: React.DragEvent) => {
-            const binding = e.dataTransfer.getData("text/x-tag-binding");
-            if (binding) {
-              e.preventDefault();
-              e.stopPropagation();
-              updateWidget(activePageId, w.id, { binding });
-            }
-          };
-
           return (
             <div
               key={w.id}
               draggable
               onDragStart={onDragStart}
-              onDragOver={onDragOver}
-              onDrop={onDrop}
               onClick={(e) => { e.stopPropagation(); selectWidget(w.id); }}
-              className={`relative rounded-lg cursor-grab active:cursor-grabbing ${
-                selected ? "ring-2 ring-blue-500" : "ring-1 ring-transparent hover:ring-zinc-700"
+              className={`relative rounded-lg ${
+                selected
+                  ? "ring-2 ring-blue-500"
+                  : "ring-1 ring-transparent hover:ring-zinc-700"
               }`}
               style={{
                 gridColumn: `${(w.x ?? 0) + 1} / span ${w.w}`,
-                gridRow: `${(w.y ?? 0) + 1} / span ${w.h}`,
+                gridRow:    `${(w.y ?? 0) + 1} / span ${w.h}`,
+                cursor: "grab",
               }}
             >
               <WidgetRenderer w={w} />
@@ -111,11 +115,11 @@ export function Canvas() {
                 <button
                   onClick={(e) => { e.stopPropagation(); removeWidget(page.id, w.id); }}
                   className="absolute -top-2 -right-2 text-[10px] px-1.5 py-0.5 rounded bg-red-600 hover:bg-red-500 z-10"
+                  style={{ cursor: "default" }}
                 >
                   ×
                 </button>
               )}
-              {/* Binding pill — drop highlight when dragging a tag over */}
               {w.binding && (
                 <div className="absolute bottom-0 left-0 right-0 text-[9px] font-mono text-zinc-600 px-1.5 truncate pointer-events-none">
                   {w.binding}
@@ -126,7 +130,7 @@ export function Canvas() {
         })}
         {page.widgets.length === 0 && (
           <div className="col-span-full row-span-2 flex items-center justify-center text-zinc-600 italic text-sm">
-            Add widgets from the palette ← then drag tags from the browser → to bind them
+            Add widgets from the palette ← · drag tags from the browser → to bind
           </div>
         )}
       </div>

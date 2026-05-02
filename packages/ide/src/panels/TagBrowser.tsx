@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useProject } from "../store/projectStore";
+import { apiBase } from "../store/runtimeTarget";
 
 type TagDef = { Path: string; Description?: string; Writable?: boolean };
 type DSStatus = { connected: boolean; lastError: string; tagCount: number };
@@ -18,8 +19,8 @@ export function TagBrowser() {
     for (const ds of project.datasources) {
       try {
         const [tagR, stR] = await Promise.all([
-          fetch(`/api/v1/datasources/${ds.id}/tags`),
-          fetch(`/api/v1/datasources/${ds.id}/status`),
+          fetch(`${apiBase}/api/v1/datasources/${ds.id}/tags`),
+          fetch(`${apiBase}/api/v1/datasources/${ds.id}/status`),
         ]);
         const data = tagR.ok ? await tagR.json() : null;
         nextTags[ds.id] = Array.isArray(data) ? data : [];

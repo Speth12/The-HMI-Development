@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Widget } from "../store/projectStore";
 import { useTag } from "../hooks/useTag";
+import { apiBase } from "../store/runtimeTarget";
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -19,20 +20,21 @@ const qualityColor: Record<string, string> = {
   Unknown: "text-zinc-500",
 };
 
-/** POST a value to the write endpoint. Binding is "dsId:tagPath". */
+/** POST a value to the write endpoint. Binding is "dsId:tagPath".
+ *  Always uses the current runtime target (local or PLC). */
 async function writeTag(binding: string, value: unknown): Promise<void> {
   const sep = binding.indexOf(":");
   if (sep < 0) return;
   const datasource = binding.slice(0, sep);
   const path = binding.slice(sep + 1);
   try {
-    await fetch(`/api/v1/tag/${encodeURIComponent(path)}`, {
+    await fetch(`${apiBase}/api/v1/tag/${encodeURIComponent(path)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ datasource, value }),
     });
   } catch {
-    // swallow — write failures are visible as stale read values
+    // swallow — write failures visible as stale read values
   }
 }
 
@@ -246,7 +248,7 @@ function TrendWidget({ w }: { w: Widget }) {
   useEffect(() => {
     if (!w.binding) { setPts([]); ptsRef.current = []; return; }
     const from = (Date.now() - duration) * 1e6; // ns
-    fetch(`/api/v1/history?path=${encodeURIComponent(w.binding)}&from=${from}&limit=500`)
+    fetch(`${apiBase}/api/v1/history?path=${encodeURIComponent(w.binding)}&from=${from}&limit=500`)
       .then((r) => (r.ok ? r.json() : []))
       .then((samples: Array<{ ts: number; value: unknown }>) => {
         const loaded: Sample[] = samples
@@ -344,7 +346,7 @@ function HistoryLogWidget({ w }: { w: Widget }) {
   useEffect(() => {
     if (!w.binding) return;
     const from = (Date.now() - 3600_000) * 1e6;
-    fetch(`/api/v1/history?path=${encodeURIComponent(w.binding)}&from=${from}&limit=${(w.config?.pageSize as number) ?? 100}`)
+    fetch(`${apiBase}/api/v1/history?path=${encodeURIComponent(w.binding)}&from=${from}&limit=${(w.config?.pageSize as number) ?? 100}`)
       .then((r) => (r.ok ? r.json() : []))
       .then(setRows)
       .catch(() => {});

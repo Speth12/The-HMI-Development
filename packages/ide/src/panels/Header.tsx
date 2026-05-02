@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useProject, type DatasourceType } from "../store/projectStore";
+import { setApiBase } from "../store/runtimeTarget";
+import { tagStoreClient } from "../store/tagStoreClient";
 
 const LOCAL = "/api/v1";
 const storedTarget = () => localStorage.getItem("deployTarget") ?? LOCAL;
@@ -13,9 +15,20 @@ export function Header() {
   const [msg, setMsg] = useState("");
   const [target, setTarget] = useState(storedTarget);
 
+  // Sync the module-level API base on first render so tagStoreClient and
+  // widgets use the correct URL before any user interaction.
+  useEffect(() => {
+    const base = runtimeBase(storedTarget());
+    setApiBase(base);
+    tagStoreClient.reconnectTo(base);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const saveTarget = (v: string) => {
     setTarget(v);
     localStorage.setItem("deployTarget", v);
+    const base = runtimeBase(v);
+    setApiBase(base);
+    tagStoreClient.reconnectTo(base);
   };
 
   const apiBase = runtimeBase(target);

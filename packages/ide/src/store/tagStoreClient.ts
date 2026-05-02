@@ -1,5 +1,8 @@
 // TagStoreClient — single WebSocket connection to /ws/tags with a per-path
 // subscriber registry. Caches the last value so re-mounts hydrate immediately.
+// The WS URL follows the active runtime target (local dev or remote PLC).
+
+import { wsUrl } from "./runtimeTarget";
 
 export type TagState = {
   value: unknown;
@@ -8,7 +11,6 @@ export type TagState = {
 };
 
 type Listener = (s: TagState) => void;
-
 type Outgoing = { subscribe?: string[]; unsubscribe?: string[] };
 type Incoming = { path: string; value: unknown; quality: TagState["quality"]; ts: number };
 
@@ -31,7 +33,6 @@ class Client {
     }
     set.add(fn);
 
-    // immediately hydrate from cache if known
     const cached = this.cache.get(path);
     if (cached) fn(cached);
 
@@ -54,15 +55,29 @@ class Client {
     return this.cache.get(path);
   }
 
+  /**
+   * Switch the WebSocket to a new target URL.
+   * Called by Header whenever the deploy target changes.
+   */
+  reconnectTo(_url: string): void {
+    // Close existing connection; ensureConnected will use the new wsUrl().
+    if (this.ws) {
+      this.ws.onclose = null; // prevent auto-reconnect loop
+      this.ws.onerror = null;
+      this.ws.close();
+      this.ws = null;
+    }
+    this.connected = false;
+    this.connecting = false;
+    this.cache.clear();
+    if (this.listeners.size) this.ensureConnected();
+  }
+
   private ensureConnected(): void {
     if (this.connected || this.connecting) return;
     this.connecting = true;
 
-    const url =
-      (location.protocol === "https:" ? "wss://" : "ws://") +
-      location.host +
-      "/ws/tags";
-
+    const url = wsUrl(); // reads the current target from runtimeTarget.ts
     const ws = new WebSocket(url);
     this.ws = ws;
 
@@ -82,25 +97,24 @@ class Client {
           ts: msg.ts ?? Date.now() * 1e6,
         };
         this.cache.set(msg.path, state);
-        const subs = this.listeners.get(msg.path);
-        subs?.forEach((fn) => fn(state));
+        this.listeners.get(msg.path)?.forEach((fn) => fn(state));
       } catch {
         // ignore malformed
       }
     });
 
-    const reconnect = () => {
+    const scheduleReconnect = () => {
       this.connecting = false;
       this.connected = false;
       this.ws = null;
       if (this.listeners.size) setTimeout(() => this.ensureConnected(), RECONNECT_MS);
     };
-    ws.addEventListener("close", reconnect);
-    ws.addEventListener("error", reconnect);
+    ws.addEventListener("close", scheduleReconnect);
+    ws.addEventListener("error", scheduleReconnect);
   }
 
   private send(msg: Outgoing): void {
-    if (this.connected && this.ws && this.ws.readyState === WebSocket.OPEN) {
+    if (this.connected && this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
     }
   }
