@@ -53,6 +53,7 @@ type State = {
   selectWidget: (id: string | null) => void;
 
   addPage: (name?: string) => void;
+  renamePage: (id: string, name: string) => void;
   removePage: (id: string) => void;
 
   addDatasource: (ds: Datasource) => void;
@@ -93,6 +94,14 @@ export const useProject = create<State>((set, get) => ({
       const page: Page = { id, name: name || `Page ${s.project.pages.length + 1}`, widgets: [] };
       return { project: { ...s.project, pages: [...s.project.pages, page] }, activePageId: id };
     }),
+
+  renamePage: (id, name) =>
+    set((s) => ({
+      project: {
+        ...s.project,
+        pages: s.project.pages.map((p) => (p.id === id ? { ...p, name } : p)),
+      },
+    })),
 
   removePage: (id) =>
     set((s) => {
