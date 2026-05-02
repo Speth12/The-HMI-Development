@@ -1,17 +1,58 @@
+import { useRef } from "react";
 import { useProject } from "../store/projectStore";
 import { WidgetRenderer } from "../widgets";
 
 const COLS = 12;
 const ROW_H = 64; // px per grid row
+const GAP = 8;    // gap-2 = 0.5rem = 8px
+
+// Module-level drag state — avoids stale closure issues during drag events.
+let widgetDrag: { id: string; ox: number; oy: number } | null = null;
+
+function cellFromEvent(grid: HTMLElement, e: React.DragEvent) {
+  const rect = grid.getBoundingClientRect();
+  const col = Math.max(0, Math.min(COLS - 1, Math.floor((e.clientX - rect.left) / (rect.width / COLS))));
+  const row = Math.max(0, Math.floor((e.clientY - rect.top) / (ROW_H + GAP)));
+  return { col, row };
+}
 
 export function Canvas() {
-  const { project, activePageId, selectedWidgetId, selectWidget, removeWidget } = useProject();
+  const { project, activePageId, selectedWidgetId, selectWidget, removeWidget, updateWidget } = useProject();
+  const gridRef = useRef<HTMLDivElement>(null);
+
   const page = project.pages.find((p) => p.id === activePageId);
   if (!page) return <div className="p-6 text-zinc-500">No page selected.</div>;
 
+  // Canvas receives drops of moved widgets.
+  const onGridDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes("text/x-widget-id")) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+    }
+  };
+
+  const onGridDrop = (e: React.DragEvent) => {
+    if (!widgetDrag || !gridRef.current) return;
+    e.preventDefault();
+    const { col, row } = cellFromEvent(gridRef.current, e);
+    const w = page.widgets.find((x) => x.id === widgetDrag!.id);
+    if (w) {
+      updateWidget(activePageId, widgetDrag.id, {
+        x: Math.max(0, Math.min(COLS - w.w, col - widgetDrag.ox)),
+        y: Math.max(0, row - widgetDrag.oy),
+      });
+    }
+    widgetDrag = null;
+  };
+
   return (
-    <div className="flex-1 overflow-auto p-6 bg-zinc-950">
+    <div
+      className="flex-1 overflow-auto p-6 bg-zinc-950"
+      onDragOver={onGridDragOver}
+      onDrop={onGridDrop}
+    >
       <div
+        ref={gridRef}
         className="grid gap-2 max-w-[1400px] mx-auto"
         style={{
           gridTemplateColumns: `repeat(${COLS}, 1fr)`,
@@ -21,11 +62,45 @@ export function Canvas() {
       >
         {page.widgets.map((w) => {
           const selected = selectedWidgetId === w.id;
+
+          const onDragStart = (e: React.DragEvent) => {
+            e.stopPropagation();
+            if (!gridRef.current) return;
+            const { col, row } = cellFromEvent(gridRef.current, e);
+            widgetDrag = { id: w.id, ox: col - (w.x ?? 0), oy: row - (w.y ?? 0) };
+            e.dataTransfer.setData("text/x-widget-id", w.id);
+            e.dataTransfer.effectAllowed = "move";
+          };
+
+          // Widget itself is a drop target for tag bindings.
+          const onDragOver = (e: React.DragEvent) => {
+            if (e.dataTransfer.types.includes("text/x-tag-binding")) {
+              e.preventDefault();
+              e.stopPropagation();
+              e.dataTransfer.dropEffect = "link";
+            }
+          };
+
+          const onDrop = (e: React.DragEvent) => {
+            const binding = e.dataTransfer.getData("text/x-tag-binding");
+            if (binding) {
+              e.preventDefault();
+              e.stopPropagation();
+              updateWidget(activePageId, w.id, { binding });
+            }
+          };
+
           return (
             <div
               key={w.id}
+              draggable
+              onDragStart={onDragStart}
+              onDragOver={onDragOver}
+              onDrop={onDrop}
               onClick={(e) => { e.stopPropagation(); selectWidget(w.id); }}
-              className={`relative rounded-lg ${selected ? "ring-2 ring-blue-500" : "ring-1 ring-transparent hover:ring-zinc-700"}`}
+              className={`relative rounded-lg cursor-grab active:cursor-grabbing ${
+                selected ? "ring-2 ring-blue-500" : "ring-1 ring-transparent hover:ring-zinc-700"
+              }`}
               style={{
                 gridColumn: `${(w.x ?? 0) + 1} / span ${w.w}`,
                 gridRow: `${(w.y ?? 0) + 1} / span ${w.h}`,
@@ -35,17 +110,23 @@ export function Canvas() {
               {selected && (
                 <button
                   onClick={(e) => { e.stopPropagation(); removeWidget(page.id, w.id); }}
-                  className="absolute -top-2 -right-2 text-[10px] px-1.5 py-0.5 rounded bg-red-600 hover:bg-red-500"
+                  className="absolute -top-2 -right-2 text-[10px] px-1.5 py-0.5 rounded bg-red-600 hover:bg-red-500 z-10"
                 >
                   ×
                 </button>
+              )}
+              {/* Binding pill — drop highlight when dragging a tag over */}
+              {w.binding && (
+                <div className="absolute bottom-0 left-0 right-0 text-[9px] font-mono text-zinc-600 px-1.5 truncate pointer-events-none">
+                  {w.binding}
+                </div>
               )}
             </div>
           );
         })}
         {page.widgets.length === 0 && (
           <div className="col-span-full row-span-2 flex items-center justify-center text-zinc-600 italic text-sm">
-            Empty page — add widgets from the left palette.
+            Add widgets from the palette ← then drag tags from the browser → to bind them
           </div>
         )}
       </div>

@@ -12,6 +12,21 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+func (s *Server) handleTestDatasource(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	var ds project.DatasourceElement
+	if err := json.NewDecoder(r.Body).Decode(&ds); err != nil {
+		writeErr(w, 400, "invalid json: "+err.Error())
+		return
+	}
+	if ds.Type == "" {
+		writeErr(w, 400, "type is required")
+		return
+	}
+	st := s.rt.TestDatasource(r.Context(), ds)
+	writeJSON(w, 200, st)
+}
+
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)

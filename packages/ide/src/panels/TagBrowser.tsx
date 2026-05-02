@@ -90,10 +90,14 @@ export function TagBrowser() {
                 .map((t) => (
                 <button
                   key={t.Path}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("text/x-tag-binding", `${ds.id}:${t.Path}`);
+                    e.dataTransfer.effectAllowed = "link";
+                  }}
                   onClick={() => bind(ds.id, t.Path)}
-                  title={t.Path}
-                  disabled={!selectedWidgetId}
-                  className="block w-full text-left py-0.5 px-1.5 rounded hover:bg-zinc-800 disabled:opacity-60"
+                  title={`${ds.id}:${t.Path} — drag onto a widget to bind`}
+                  className="block w-full text-left py-0.5 px-1.5 rounded hover:bg-zinc-800 cursor-grab active:cursor-grabbing"
                 >
                   <div className="text-[11px] truncate">{t.Description || t.Path}</div>
                   {t.Description && (

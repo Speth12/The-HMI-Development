@@ -37,7 +37,7 @@ export function Properties() {
           className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs font-mono"
         />
         <div className="text-[10px] text-zinc-600 mt-1">
-          Click a tag on the right to bind it.
+          Drag a tag from the browser → drop onto the widget, or type manually.
         </div>
       </div>
 

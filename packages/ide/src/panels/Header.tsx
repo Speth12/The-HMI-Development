@@ -116,22 +116,27 @@ function AddDatasourceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (d
   const [label, setLabel] = useState(TYPE_DEFAULTS.opcua.label);
   const [ip, setIp] = useState("10.0.0.210");
   // per-type extras
-  const [opcuaPort, setOpcuaPort]         = useState(4840);
-  const [securityMode, setSecurityMode]   = useState("None");
+  const [opcuaPort, setOpcuaPort]           = useState(4840);
+  const [securityMode, setSecurityMode]     = useState("None");
   const [securityPolicy, setSecurityPolicy] = useState("None");
-  const [mbPort, setMbPort]               = useState(502);
-  const [slaveId, setSlaveId]             = useState(1);
-  const [mqttPort, setMqttPort]           = useState(1883);
-  const [basePath, setBasePath]           = useState("/_pxc_api/v1.14");
-  const [bearerToken, setBearerToken]     = useState("");
+  const [mbPort, setMbPort]                 = useState(502);
+  const [slaveId, setSlaveId]               = useState(1);
+  const [mqttPort, setMqttPort]             = useState(1883);
+  const [basePath, setBasePath]             = useState("/_pxc_api/v1.14");
+  const [bearerToken, setBearerToken]       = useState("");
+  // test connection
+  const [testing, setTesting]               = useState(false);
+  const [testResult, setTestResult]         = useState<{ ok: boolean; msg: string } | null>(null);
 
   const changeType = (t: DatasourceType) => {
     setType(t);
     setId(TYPE_DEFAULTS[t].id);
     setLabel(TYPE_DEFAULTS[t].label);
+    setTestResult(null);
   };
 
-  const submit = () => {
+  /** Build the datasource element payload (used for both Test and Add). */
+  const buildPayload = () => {
     const config: Record<string, unknown> = {};
     if (type === "opcua") {
       config.endpoint = `opc.tcp://${ip}:${opcuaPort}`;
@@ -149,7 +154,35 @@ function AddDatasourceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (d
       config.basePath = basePath;
       if (bearerToken) config.bearerToken = bearerToken;
     }
-    onAdd({ id, type, label, config });
+    return { id, type, label, config };
+  };
+
+  const testConn = async () => {
+    setTesting(true);
+    setTestResult(null);
+    const { type: dsType, config } = buildPayload();
+    try {
+      const r = await fetch("/api/v1/datasources/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: "test", type: dsType, label: "test", config }),
+      });
+      const data = (await r.json()) as { connected: boolean; lastError?: string; tagCount?: number };
+      if (data.connected) {
+        setTestResult({ ok: true, msg: `Connected${data.tagCount ? ` · ${data.tagCount} tags` : ""}` });
+      } else {
+        setTestResult({ ok: false, msg: data.lastError ?? "Connection failed" });
+      }
+    } catch (e) {
+      setTestResult({ ok: false, msg: (e as Error).message });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const submit = () => {
+    const { id: dsId, type: dsType, label: dsLabel, config } = buildPayload();
+    onAdd({ id: dsId, type: dsType, label: dsLabel, config });
   };
 
   const inputCls = "mt-1 w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs font-mono";
@@ -255,7 +288,20 @@ function AddDatasourceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (d
           {type === "rest"  && `https://${ip}${basePath}`}
         </div>
 
-        <div className="flex justify-end gap-2 pt-1">
+        <div className="flex items-center gap-2 pt-1">
+          <button
+            onClick={testConn}
+            disabled={testing}
+            className="text-xs px-3 py-1 rounded bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50"
+          >
+            {testing ? "Testing…" : "Test"}
+          </button>
+          {testResult && (
+            <span className={`text-[11px] flex-1 truncate ${testResult.ok ? "text-emerald-400" : "text-red-400"}`}>
+              {testResult.ok ? "✓ " : "✗ "}{testResult.msg}
+            </span>
+          )}
+          <div className="flex-1" />
           <button onClick={onClose} className="text-xs px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700">Cancel</button>
           <button onClick={submit} className="text-xs px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 font-medium">Add</button>
         </div>

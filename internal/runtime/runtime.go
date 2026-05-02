@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/Speth12/x-hmi/internal/drivers"
 	"github.com/Speth12/x-hmi/internal/drivers/modbus"
@@ -142,6 +143,29 @@ func (r *Runtime) LoadProject(ctx context.Context, p *project.Project) error {
 		}
 	}
 	return nil
+}
+
+// TestDatasource creates a temporary driver, attempts to connect within 10 s,
+// returns its status, then disconnects. Safe to call concurrently.
+func (r *Runtime) TestDatasource(ctx context.Context, ds project.DatasourceElement) drivers.DriverStatus {
+	drv, err := buildDriver(ds.Type)
+	if err != nil {
+		return drivers.DriverStatus{LastError: err.Error()}
+	}
+	tctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	cfg := buildConfig(ds)
+	if err := drv.Connect(tctx, cfg); err != nil {
+		return drivers.DriverStatus{LastError: err.Error()}
+	}
+	// Give driver a moment to fully handshake (especially MQTT).
+	select {
+	case <-time.After(500 * time.Millisecond):
+	case <-tctx.Done():
+	}
+	st := drv.Status()
+	_ = drv.Disconnect()
+	return st
 }
 
 // Project returns the currently loaded project (may be nil).

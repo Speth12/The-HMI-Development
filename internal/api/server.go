@@ -56,6 +56,7 @@ func (s *Server) routes(assets http.Handler) {
 
 		r.Route("/datasources", func(r chi.Router) {
 			r.Get("/", s.handleListDatasources)
+			r.Post("/test", s.handleTestDatasource)
 			r.Get("/{id}/status", s.handleDatasourceStatus)
 			r.Get("/{id}/tags", s.handleBrowseDatasource)
 		})
