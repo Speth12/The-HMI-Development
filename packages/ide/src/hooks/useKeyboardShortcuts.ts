@@ -1,10 +1,12 @@
 // Global keyboard shortcut handler for the IDE.
 // Mounted once in App — uses window event listeners.
-import { useEffect } from "react";
-import { useProject } from "../store/projectStore";
+import { useEffect, useRef } from "react";
+import { useProject, type Widget } from "../store/projectStore";
+import { newWidgetId } from "../store/projectStore";
 
 export function useKeyboardShortcuts() {
-  const { activePageId, selectedWidgetId, selectWidget, removeWidget, project, exportJSON } = useProject();
+  const { activePageId, selectedWidgetId, selectWidget, removeWidget, addWidget, project, exportJSON } = useProject();
+  const clipboard = useRef<Widget | null>(null);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -36,9 +38,39 @@ export function useKeyboardShortcuts() {
         URL.revokeObjectURL(url);
         return;
       }
+
+      // Ctrl/Cmd+C — copy selected widget
+      if ((e.ctrlKey || e.metaKey) && e.key === "c" && selectedWidgetId) {
+        const page = project.pages.find((p) => p.id === activePageId);
+        const w = page?.widgets.find((x) => x.id === selectedWidgetId);
+        if (w) { clipboard.current = w; }
+        return;
+      }
+
+      // Ctrl/Cmd+D — duplicate selected widget
+      if ((e.ctrlKey || e.metaKey) && e.key === "d" && selectedWidgetId) {
+        e.preventDefault();
+        const page = project.pages.find((p) => p.id === activePageId);
+        const w = page?.widgets.find((x) => x.id === selectedWidgetId);
+        if (w) {
+          const nextY = page!.widgets.reduce((max, wg) => Math.max(max, wg.y + wg.h), 0);
+          addWidget(activePageId, { ...w, id: newWidgetId(), y: nextY });
+        }
+        return;
+      }
+
+      // Ctrl/Cmd+V — paste widget
+      if ((e.ctrlKey || e.metaKey) && e.key === "v" && clipboard.current) {
+        e.preventDefault();
+        const w = clipboard.current;
+        const page = project.pages.find((p) => p.id === activePageId);
+        const nextY = page?.widgets.reduce((max, wg) => Math.max(max, wg.y + wg.h), 0) ?? 0;
+        addWidget(activePageId, { ...w, id: newWidgetId(), y: nextY });
+        return;
+      }
     };
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activePageId, selectedWidgetId, project.name, exportJSON, selectWidget, removeWidget]);
+  }, [activePageId, selectedWidgetId, project, exportJSON, selectWidget, removeWidget, addWidget]);
 }
