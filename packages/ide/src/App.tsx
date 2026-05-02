@@ -6,6 +6,7 @@ import { Palette } from "./panels/Palette";
 import { Properties } from "./panels/Properties";
 import { TagBrowser } from "./panels/TagBrowser";
 import { Alarms, AlarmBadge } from "./panels/Alarms";
+import { StatusBar } from "./panels/StatusBar";
 import { useProject } from "./store/projectStore";
 
 export function App() {
@@ -52,6 +53,7 @@ export function App() {
           {rightTab === "alarms" ? <Alarms /> : <ProjectJSONPanel />}
         </div>
       </div>
+      <StatusBar />
     </div>
   );
 }

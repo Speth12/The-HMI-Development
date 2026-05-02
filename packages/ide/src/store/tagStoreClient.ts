@@ -55,6 +55,11 @@ class Client {
     return this.cache.get(path);
   }
 
+  /** Returns true if the WebSocket is currently open. */
+  isConnected(): boolean {
+    return this.connected && this.ws?.readyState === WebSocket.OPEN;
+  }
+
   /**
    * Switch the WebSocket to a new target URL.
    * Called by Header whenever the deploy target changes.
