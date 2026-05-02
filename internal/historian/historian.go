@@ -101,6 +101,18 @@ func (h *Historian) Record(u tagstore.TagUpdate) error {
 	return err
 }
 
+// RecordWrite stores a manually-written value with quality "Write" for audit purposes.
+func (h *Historian) RecordWrite(path string, value any) error {
+	val, err := json.Marshal(value)
+	if err != nil {
+		val = []byte(fmt.Sprintf("%q", fmt.Sprint(value)))
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, err = h.insertStmt.Exec(path, time.Now().UnixNano(), string(val), "Write")
+	return err
+}
+
 // Query returns samples for path within [from, to] (Unix nanos), oldest first.
 // limit caps the number of returned samples (0 = no limit).
 func (h *Historian) Query(ctx context.Context, path string, from, to int64, limit int) ([]Sample, error) {

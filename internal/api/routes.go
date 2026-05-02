@@ -160,6 +160,11 @@ func (s *Server) handleWriteTag(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	// Audit: record the write to history so operators can see who changed what.
+	if s.rt.Historian != nil {
+		fullPath := body.Datasource + ":" + path
+		_ = s.rt.Historian.RecordWrite(fullPath, body.Value)
+	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
