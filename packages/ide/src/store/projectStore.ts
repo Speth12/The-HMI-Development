@@ -23,11 +23,25 @@ export type Datasource = {
   config: Record<string, unknown>;
 };
 
+export type AlarmCondition = "gt" | "gte" | "lt" | "lte" | "eq" | "ne";
+export type AlarmSeverity = "critical" | "warning" | "info";
+
+export type AlarmRule = {
+  id: string;
+  name: string;
+  binding: string;      // "dsId:tagPath"
+  condition: AlarmCondition;
+  threshold: number;
+  severity: AlarmSeverity;
+  message: string;
+};
+
 export type Project = {
   version: string;
   name?: string;
   datasources: Datasource[];
   pages: Page[];
+  alarmRules?: AlarmRule[];
 };
 
 type State = {
@@ -47,6 +61,10 @@ type State = {
   addWidget: (pageId: string, w: Widget) => void;
   updateWidget: (pageId: string, id: string, patch: Partial<Widget>) => void;
   removeWidget: (pageId: string, id: string) => void;
+
+  addAlarmRule: (rule: AlarmRule) => void;
+  updateAlarmRule: (id: string, patch: Partial<AlarmRule>) => void;
+  removeAlarmRule: (id: string) => void;
 
   loadProject: (p: Project) => void;
   exportJSON: () => string;
@@ -125,6 +143,25 @@ export const useProject = create<State>((set, get) => ({
         ),
       },
       selectedWidgetId: null,
+    })),
+
+  addAlarmRule: (rule) =>
+    set((s) => ({ project: { ...s.project, alarmRules: [...(s.project.alarmRules ?? []), rule] } })),
+
+  updateAlarmRule: (id, patch) =>
+    set((s) => ({
+      project: {
+        ...s.project,
+        alarmRules: (s.project.alarmRules ?? []).map((r) => (r.id === id ? { ...r, ...patch } : r)),
+      },
+    })),
+
+  removeAlarmRule: (id) =>
+    set((s) => ({
+      project: {
+        ...s.project,
+        alarmRules: (s.project.alarmRules ?? []).filter((r) => r.id !== id),
+      },
     })),
 
   loadProject: (p) => set({ project: p, activePageId: p.pages[0]?.id ?? "p1", selectedWidgetId: null }),

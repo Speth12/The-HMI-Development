@@ -104,6 +104,53 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleAlarmWS streams alarm events to clients over WebSocket.
+// On connect it sends all current events, then pushes incremental changes.
+func (s *Server) handleAlarmWS(w http.ResponseWriter, r *http.Request) {
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+	if err != nil {
+		log.Printf("[WS/alarms] accept: %v", err)
+		return
+	}
+	defer conn.Close(websocket.StatusInternalError, "shutting down")
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	log.Printf("[WS/alarms] client connected from %s", r.RemoteAddr)
+
+	// Send snapshot of current events.
+	snapshot := s.rt.Alarms.Events()
+	for _, ev := range snapshot {
+		wctx, wcancel := context.WithTimeout(ctx, 2*time.Second)
+		_ = wsjson.Write(wctx, conn, ev)
+		wcancel()
+	}
+
+	// Subscribe for changes.
+	ch := s.rt.Alarms.Subscribe()
+	defer s.rt.Alarms.Unsubscribe(ch)
+
+	for {
+		select {
+		case <-ctx.Done():
+			conn.Close(websocket.StatusNormalClosure, "bye")
+			return
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			wctx, wcancel := context.WithTimeout(ctx, 2*time.Second)
+			err := wsjson.Write(wctx, conn, ev)
+			wcancel()
+			if err != nil {
+				log.Printf("[WS/alarms] write: %v", err)
+				return
+			}
+		}
+	}
+}
+
 // fanIn forwards from one tagstore subscription channel into the shared updates channel.
 func fanIn(ctx context.Context, in <-chan tagstore.TagUpdate, out chan<- tagstore.TagUpdate) {
 	for {

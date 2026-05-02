@@ -3,12 +3,28 @@ package project
 // Runtime project file — single source of truth. Generated types: internal/project/types.go
 // + packages/shared-types/src/project.ts
 type Types struct {
+	// Alarm rules evaluated against live tag values
+	AlarmRules                     []AlarmRule         `json:"alarmRules,omitempty"`
 	Datasources                    []DatasourceElement `json:"datasources"`
-	// Human-readable project name                     
+	// Human-readable project name
 	Name                           *string             `json:"name,omitempty"`
 	Pages                          []PageElement       `json:"pages"`
-	// Schema version, e.g. '0.1.0'                    
+	// Schema version, e.g. '0.1.0'
 	Version                        string              `json:"version"`
+}
+
+// AlarmRule defines when an alarm should fire based on a tag value.
+type AlarmRule struct {
+	// Comparison operator: gt, gte, lt, lte, eq, ne
+	Condition string  `json:"condition"`
+	ID        string  `json:"id"`
+	// datasource_id:tag_path, e.g. 'opcua:ns=2;s=PLCnext.pressure'
+	Binding   string  `json:"binding"`
+	Message   string  `json:"message"`
+	Name      string  `json:"name"`
+	// critical, warning, info
+	Severity  string  `json:"severity"`
+	Threshold float64 `json:"threshold"`
 }
 
 type DatasourceElement struct {

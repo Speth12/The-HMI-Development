@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Speth12/x-hmi/internal/alarms"
 	"github.com/Speth12/x-hmi/internal/drivers"
 	"github.com/Speth12/x-hmi/internal/drivers/modbus"
 	"github.com/Speth12/x-hmi/internal/drivers/mqtt"
@@ -18,10 +19,11 @@ import (
 	"github.com/Speth12/x-hmi/internal/tagstore"
 )
 
-// Runtime owns the TagStore, Historian, and active driver instances.
+// Runtime owns the TagStore, Historian, alarm Engine, and active driver instances.
 type Runtime struct {
 	Store     *tagstore.TagStore
 	Historian *historian.Historian
+	Alarms    *alarms.Engine
 
 	mu       sync.RWMutex
 	drivers  map[string]drivers.ProtocolDriver // datasource id → driver
@@ -41,6 +43,7 @@ func New(store *tagstore.TagStore, h *historian.Historian) *Runtime {
 	return &Runtime{
 		Store:     store,
 		Historian: h,
+		Alarms:    alarms.New(),
 		drivers:   make(map[string]drivers.ProtocolDriver),
 		pumpCh:    make(chan tagstore.TagUpdate, 1024),
 	}
@@ -73,6 +76,21 @@ func (r *Runtime) Stop() {
 // LoadProject reconfigures drivers based on a project file.
 // Existing drivers not in the new project are disconnected.
 func (r *Runtime) LoadProject(ctx context.Context, p *project.Project) error {
+	// Update alarm rules.
+	rules := make([]alarms.Rule, 0, len(p.AlarmRules))
+	for _, ar := range p.AlarmRules {
+		rules = append(rules, alarms.Rule{
+			ID:        ar.ID,
+			Name:      ar.Name,
+			Binding:   ar.Binding,
+			Condition: alarms.Condition(ar.Condition),
+			Threshold: ar.Threshold,
+			Severity:  alarms.Severity(ar.Severity),
+			Message:   ar.Message,
+		})
+	}
+	r.Alarms.SetRules(rules)
+
 	r.mu.Lock()
 	r.project = p
 	desired := map[string]bool{}
@@ -200,7 +218,7 @@ func (r *Runtime) has(id string) bool {
 	return ok
 }
 
-// pump reads from drivers, writes to TagStore + Historian.
+// pump reads from drivers, writes to TagStore + Historian + Alarms.
 func (r *Runtime) pump(ctx context.Context) {
 	defer r.wg.Done()
 	for {
@@ -215,6 +233,7 @@ func (r *Runtime) pump(ctx context.Context) {
 			if r.Historian != nil {
 				_ = r.Historian.Record(u)
 			}
+			r.Alarms.Evaluate(u.Path, u.State.Value)
 		}
 	}
 }

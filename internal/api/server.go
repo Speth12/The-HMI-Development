@@ -67,9 +67,15 @@ func (s *Server) routes(assets http.Handler) {
 		})
 
 		r.Get("/history", s.handleHistory)
+
+		r.Route("/alarms", func(r chi.Router) {
+			r.Get("/", s.handleListAlarms)
+			r.Post("/{id}/ack", s.handleAckAlarm)
+		})
 	})
 
 	r.Get("/ws/tags", s.handleWS)
+	r.Get("/ws/alarms", s.handleAlarmWS)
 
 	if assets != nil {
 		r.Handle("/*", assets)

@@ -196,3 +196,18 @@ func parseInt64(s string, def int64) int64 {
 	}
 	return n
 }
+
+// ── Alarms ─────────────────────────────────────────────────────────────────
+
+func (s *Server) handleListAlarms(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, s.rt.Alarms.Events())
+}
+
+func (s *Server) handleAckAlarm(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !s.rt.Alarms.Acknowledge(id) {
+		writeErr(w, 404, "event not found")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
