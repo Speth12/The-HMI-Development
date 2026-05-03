@@ -107,8 +107,9 @@ func TestConnectAndSubscribe(t *testing.T) {
 		if u.Path != "x-hmi/test/temp" {
 			t.Errorf("path: got %q want x-hmi/test/temp", u.Path)
 		}
-		if v, ok := u.State.Value.(string); !ok || v != "23.5" {
-			t.Errorf("value: got %v want 23.5", u.State.Value)
+		// parsePayload JSON-decodes numeric payloads → float64
+		if v, ok := u.State.Value.(float64); !ok || v != 23.5 {
+			t.Errorf("value: got %v (%T) want float64(23.5)", u.State.Value, u.State.Value)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("did not receive published message in 2s")
