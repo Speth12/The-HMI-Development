@@ -387,6 +387,8 @@ function TrendWidget({ w }: { w: Widget }) {
   const toLine = (pts: Sample[]) => pts.length < 2 ? "" : pts.filter((p) => p.ts >= tMin)
     .map((p) => `${(((p.ts-tMin)/tSpan)*100).toFixed(2)},${(100-((p.v-vMin)/vRange)*100).toFixed(2)}`).join(" ");
 
+  const midVal = (vMin + vMax) / 2;
+
   return (
     <div className="flex flex-col h-full">
       {/* Time-window picker */}
@@ -398,31 +400,44 @@ function TrendWidget({ w }: { w: Widget }) {
           </button>
         ))}
       </div>
-      <svg className="flex-1 w-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
-        {[0,25,50,75,100].map((y) => (
-          <line key={y} x1="0" y1={y} x2="100" y2={y} stroke="#27272a" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
-        ))}
+      {/* Chart area with Y-axis */}
+      <div className="flex flex-1 min-h-0 gap-1">
+        {/* Y-axis labels */}
+        <div className="flex flex-col justify-between text-[8px] font-mono text-zinc-600 shrink-0 w-7 text-right py-0.5">
+          <span>{vMax.toFixed(0)}</span>
+          <span>{midVal.toFixed(0)}</span>
+          <span>{vMin.toFixed(0)}</span>
+        </div>
+        {/* Plot */}
+        <svg className="flex-1 overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
+          {[0, 25, 50, 75, 100].map((y) => (
+            <line key={y} x1="0" y1={y} x2="100" y2={y} stroke="#27272a" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
+          ))}
+          {allPts.map((pts, i) => {
+            const color = series[i]?.color ?? SERIES_COLORS[i % SERIES_COLORS.length]!;
+            const last = pts.at(-1);
+            return (
+              <g key={i}>
+                <polyline points={toLine(pts)} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+                {last && <circle cx={(((last.ts-tMin)/tSpan)*100)} cy={(100-((last.v-vMin)/vRange)*100)} r="2" fill={color} vectorEffect="non-scaling-stroke" />}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      {/* Legend with live values */}
+      <div className="flex items-center gap-2 text-[9px] font-mono mt-0.5 shrink-0 flex-wrap">
         {allPts.map((pts, i) => {
           const color = series[i]?.color ?? SERIES_COLORS[i % SERIES_COLORS.length]!;
           const last = pts.at(-1);
           return (
-            <g key={i}>
-              <polyline points={toLine(pts)} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
-              {last && <circle cx={(((last.ts-tMin)/tSpan)*100)} cy={(100-((last.v-vMin)/vRange)*100)} r="2" fill={color} vectorEffect="non-scaling-stroke" />}
-            </g>
+            <span key={i} className="flex items-center gap-1">
+              <span className="w-2 h-0.5 inline-block rounded" style={{ backgroundColor: color }} />
+              <span style={{ color }} className="font-semibold">{series[i]?.label ?? `s${i}`}</span>
+              <span className="text-zinc-500">{last ? fmt(last.v) : "—"}</span>
+            </span>
           );
         })}
-      </svg>
-      <div className="flex items-center justify-between text-[10px] text-zinc-600 font-mono mt-0.5 shrink-0 gap-2 flex-wrap">
-        <span>{vMin.toFixed(1)}</span>
-        <div className="flex gap-2 flex-wrap">
-          {allPts.map((pts, i) => {
-            const color = series[i]?.color ?? SERIES_COLORS[i % SERIES_COLORS.length]!;
-            const last = pts.at(-1);
-            return <span key={i} style={{ color }} className="font-semibold">{series[i]?.label ? `${series[i].label}: ` : ""}{last ? fmt(last.v) : "—"}</span>;
-          })}
-        </div>
-        <span>{vMax.toFixed(1)}</span>
       </div>
     </div>
   );

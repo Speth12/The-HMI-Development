@@ -44,15 +44,16 @@ type TagSpec struct {
 
 // Driver implements drivers.ProtocolDriver.
 type Driver struct {
-	mu       sync.RWMutex
-	specs    []TagSpec
-	vals     map[string]float64 // current upstream tag values keyed by "ds:path"
-	store    *tagstore.TagStore // upstream tagstore for live reads
-	outCh    chan<- tagstore.TagUpdate
-	stopCh   chan struct{}
-	wg       sync.WaitGroup
-	tagCount atomic.Int32
-	lastErr  atomic.Pointer[string]
+	mu        sync.RWMutex
+	specs     []TagSpec
+	vals      map[string]float64            // current upstream tag values keyed by "ds:path"
+	overrides map[string]float64            // manually written values that suppress formula evaluation
+	store     *tagstore.TagStore            // upstream tagstore for live reads
+	outCh     chan<- tagstore.TagUpdate
+	stopCh    chan struct{}
+	wg        sync.WaitGroup
+	tagCount  atomic.Int32
+	lastErr   atomic.Pointer[string]
 	connected atomic.Bool
 }
 
@@ -86,6 +87,7 @@ func (d *Driver) Connect(ctx context.Context, cfg drivers.DriverConfig) error {
 	d.mu.Lock()
 	d.specs = specs
 	d.vals = make(map[string]float64)
+	d.overrides = make(map[string]float64)
 	d.stopCh = make(chan struct{})
 	d.mu.Unlock()
 
@@ -116,7 +118,7 @@ func (d *Driver) Browse(_ context.Context) ([]drivers.TagDefinition, error) {
 		out[i] = drivers.TagDefinition{
 			Path:        s.Path,
 			Description: s.Formula,
-			Writable:    false,
+			Writable:    true, // overrides are supported via Write()
 		}
 	}
 	return out, nil
@@ -173,47 +175,62 @@ func (d *Driver) Subscribe(ctx context.Context, _ []string, ch chan<- tagstore.T
 }
 
 // refreshUpstream reads all referenced tags from the store and returns true if
-// any value changed.
+// any value changed or if any manual overrides are active (so overridden values
+// are re-emitted every tick).
 func (d *Driver) refreshUpstream(refMap map[string][]int) bool {
-	if d.store == nil {
-		return false
-	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	changed := false
-	for key := range refMap {
-		state, ok := d.store.Get(key)
-		if !ok {
-			continue
-		}
-		newVal := toFloat(state.Value)
-		if d.vals[key] != newVal {
-			d.vals[key] = newVal
-			changed = true
+	changed := len(d.overrides) > 0 // always re-emit when overrides are present
+	if d.store != nil {
+		for key := range refMap {
+			state, ok := d.store.Get(key)
+			if !ok {
+				continue
+			}
+			newVal := toFloat(state.Value)
+			if d.vals[key] != newVal {
+				d.vals[key] = newVal
+				changed = true
+			}
 		}
 	}
 	return changed
 }
 
 // evaluateAll computes all formulas and pushes their results to ch.
+// If a tag has been written via Write(), the override value is used instead
+// of the formula result — this lets Setpoint widgets and recipes actually
+// change virtual tag values during a demo.
 func (d *Driver) evaluateAll(specs []TagSpec, ch chan<- tagstore.TagUpdate) {
 	d.mu.RLock()
 	vals := make(map[string]float64, len(d.vals))
 	for k, v := range d.vals {
 		vals[k] = v
 	}
+	overrides := make(map[string]float64, len(d.overrides))
+	for k, v := range d.overrides {
+		overrides[k] = v
+	}
 	d.mu.RUnlock()
 
 	now := time.Now().UnixNano()
 	for _, s := range specs {
-		result, err := Eval(s.Formula, vals)
+		var result float64
 		quality := "Good"
-		if err != nil || math.IsNaN(result) || math.IsInf(result, 0) {
-			quality = "Bad"
-			result = 0
-			if err != nil {
-				errStr := err.Error()
-				d.lastErr.Store(&errStr)
+
+		if ov, ok := overrides[s.Path]; ok {
+			// Manual write takes precedence over the formula.
+			result = ov
+		} else {
+			var err error
+			result, err = Eval(s.Formula, vals)
+			if err != nil || math.IsNaN(result) || math.IsInf(result, 0) {
+				quality = "Bad"
+				result = 0
+				if err != nil {
+					errStr := err.Error()
+					d.lastErr.Store(&errStr)
+				}
 			}
 		}
 		select {
@@ -226,9 +243,40 @@ func (d *Driver) evaluateAll(specs []TagSpec, ch chan<- tagstore.TagUpdate) {
 	}
 }
 
-// Write is not supported for computed tags.
-func (d *Driver) Write(_ context.Context, _ string, _ any) error {
-	return fmt.Errorf("virtual: computed tags are read-only")
+// Write overrides a computed tag's value.
+// The override persists until the driver is reconnected, allowing Setpoint
+// widgets and recipes to write to virtual tags for demo/testing purposes.
+// Dependent tags that reference the overridden tag via their formula will
+// continue to update normally (using the stored override value as input).
+func (d *Driver) Write(_ context.Context, path string, val any) error {
+	f := toFloat(val)
+	d.mu.Lock()
+	// Check the tag exists.
+	found := false
+	for _, s := range d.specs {
+		if s.Path == path {
+			found = true
+			break
+		}
+	}
+	if !found {
+		d.mu.Unlock()
+		return fmt.Errorf("virtual: tag %q not found", path)
+	}
+	d.overrides[path] = f
+	d.mu.Unlock()
+
+	// Immediately push the new value without waiting for the next tick.
+	if d.outCh != nil {
+		select {
+		case d.outCh <- tagstore.TagUpdate{
+			Path:  path,
+			State: tagstore.TagState{Value: f, Quality: "Good", TS: time.Now().UnixNano()},
+		}:
+		default:
+		}
+	}
+	return nil
 }
 
 func (d *Driver) Status() drivers.DriverStatus {
