@@ -82,10 +82,9 @@ function GaugeWidget({ w }: { w: Widget }) {
   let arcColor = "#22c55e";
   thresholds.forEach((th) => { if (v >= th.value) arcColor = th.color; });
 
+  // needleAngle: degrees clockwise from 12 o'clock. Needle drawn at 12 o'clock,
+  // rotated via CSS transform for smooth animation.
   const needleAngle = GAUGE_START + fillSweep;
-  const needleTip  = gaugePolar(needleAngle, GAUGE_R - 4);
-  const needleBase = gaugePolar(needleAngle + 180, 6);
-
   const minPt = gaugePolar(GAUGE_START, GAUGE_R + 6);
   const maxPt = gaugePolar(GAUGE_START + GAUGE_SWEEP, GAUGE_R + 6);
 
@@ -114,10 +113,15 @@ function GaugeWidget({ w }: { w: Widget }) {
           fontSize="5" fill="#52525b" fontFamily="monospace">{min}</text>
         <text x={maxPt.x.toFixed(1)} y={maxPt.y.toFixed(1)} textAnchor="start"
           fontSize="5" fill="#52525b" fontFamily="monospace">{max}</text>
-        {/* Needle */}
-        <line x1={needleBase.x.toFixed(2)} y1={needleBase.y.toFixed(2)}
-          x2={needleTip.x.toFixed(2)} y2={needleTip.y.toFixed(2)}
-          stroke="#e4e4e7" strokeWidth="1.5" strokeLinecap="round" />
+        {/* Needle — rotated via CSS for smooth animation */}
+        <g style={{
+          transform: `rotate(${needleAngle}deg)`,
+          transformOrigin: `${GAUGE_CX}px ${GAUGE_CY}px`,
+          transition: "transform 0.3s ease-out",
+        }}>
+          <line x1={GAUGE_CX} y1={GAUGE_CY + 6} x2={GAUGE_CX} y2={GAUGE_CY - (GAUGE_R - 4)}
+            stroke="#e4e4e7" strokeWidth="1.5" strokeLinecap="round" />
+        </g>
         <circle cx={GAUGE_CX} cy={GAUGE_CY} r="3.5" fill="#52525b" />
         <circle cx={GAUGE_CX} cy={GAUGE_CY} r="1.5" fill="#a1a1aa" />
         {/* Value */}

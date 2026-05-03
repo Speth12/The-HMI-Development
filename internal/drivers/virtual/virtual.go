@@ -153,7 +153,7 @@ func (d *Driver) Subscribe(ctx context.Context, _ []string, ch chan<- tagstore.T
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
-		tick := time.NewTicker(1 * time.Second)
+		tick := time.NewTicker(200 * time.Millisecond)
 		defer tick.Stop()
 		for {
 			select {

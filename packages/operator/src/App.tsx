@@ -352,7 +352,12 @@ export function App() {
         {/* Header — hidden in kiosk mode */}
         {!isKiosk && (
           <div className="flex items-center gap-3 px-4 py-2 border-b border-zinc-800 bg-zinc-900/60 shrink-0">
-            <span className="font-semibold text-sm">X-HMI <span className="text-zinc-500 font-normal">Operator</span></span>
+            <span className="font-semibold text-sm">
+              {project.name
+                ? <>{project.name} <span className="text-zinc-500 font-normal text-xs">· X-HMI</span></>
+                : <>X-HMI <span className="text-zinc-500 font-normal">Operator</span></>
+              }
+            </span>
             {/* Datasource connection status dots */}
             {dsStatus.length > 0 && (
               <div className="flex gap-1.5 items-center">
@@ -514,7 +519,7 @@ function KioskStatusBar({ alarmCount }: { alarmCount: number }) {
 
   return (
     <div className="flex items-center justify-between px-4 py-1.5 bg-zinc-900/60 border-t border-zinc-800 shrink-0 text-[11px] font-mono text-zinc-500">
-      <span>X-HMI Operator</span>
+      <span>X-HMI</span>
       {alarmCount > 0 && (
         <span className="text-red-400 font-semibold">⚠ {alarmCount} active alarm{alarmCount !== 1 ? "s" : ""}</span>
       )}
