@@ -3,7 +3,14 @@ import { WidgetRenderer, type Widget } from "./widgets";
 import { WriteConfirmContext, type WriteRequest } from "./writeContext";
 
 type Page = { id: string; name: string; widgets: Widget[] };
-type Project = { version: string; pages: Page[]; datasources: unknown[] };
+type Project = { version: string; name?: string; pages: Page[]; datasources: unknown[] };
+
+type Recipe = {
+  id: string;
+  name: string;
+  description?: string;
+  entries: Array<{ binding: string; value: unknown }>;
+};
 
 type AlarmEvent = {
   id: string;
@@ -65,12 +72,88 @@ function WriteConfirmDialog({ req, onConfirm, onCancel }: {
   );
 }
 
+// ── Recipes panel ─────────────────────────────────────────────────────────
+function RecipesPanel({ onClose }: { onClose: () => void }) {
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [applying, setApplying] = useState<string | null>(null);
+  const [result, setResult] = useState<{ id: string; ok: boolean; msg: string } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/v1/recipes")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: Recipe[]) => setRecipes(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, []);
+
+  const apply = async (r: Recipe) => {
+    setApplying(r.id);
+    setResult(null);
+    try {
+      const res = await fetch(`/api/v1/recipes/${encodeURIComponent(r.id)}/apply`, { method: "POST" });
+      const data = (await res.json()) as { ok: boolean; applied?: number; errors?: string[] };
+      setResult({ id: r.id, ok: data.ok, msg: data.ok ? `Applied ${data.applied ?? "?"} tag${(data.applied ?? 1) !== 1 ? "s" : ""}` : (data.errors?.join(", ") ?? "Error") });
+    } catch {
+      setResult({ id: r.id, ok: false, msg: "Network error" });
+    } finally {
+      setApplying(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex" onClick={onClose}>
+      <div className="flex-1" />
+      <div
+        className="w-80 bg-zinc-900 border-l border-zinc-700 flex flex-col h-full shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+          <span className="text-sm font-semibold">Recipes</span>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 text-lg leading-none">×</button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+          {recipes.length === 0 && (
+            <div className="text-zinc-600 text-xs italic text-center pt-6">No recipes configured</div>
+          )}
+          {recipes.map((rec) => {
+            const res = result?.id === rec.id ? result : null;
+            return (
+              <div key={rec.id} className="bg-zinc-800 border border-zinc-700 rounded-lg p-3 space-y-2">
+                <div className="font-medium text-sm">{rec.name}</div>
+                {rec.description && <div className="text-[11px] text-zinc-500">{rec.description}</div>}
+                <div className="text-[10px] text-zinc-600 font-mono space-y-0.5">
+                  {rec.entries.map((e, i) => (
+                    <div key={i}>{e.binding.split(":").pop()} = {String(e.value)}</div>
+                  ))}
+                </div>
+                {res && (
+                  <div className={`text-[11px] font-medium ${res.ok ? "text-emerald-400" : "text-red-400"}`}>
+                    {res.ok ? "✓ " : "✗ "}{res.msg}
+                  </div>
+                )}
+                <button
+                  onClick={() => apply(rec)}
+                  disabled={applying === rec.id}
+                  className="w-full py-1.5 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-xs font-semibold transition-colors"
+                >
+                  {applying === rec.id ? "Applying…" : "Apply Recipe"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const [project, setProject] = useState<Project | null>(null);
   const [activePage, setActivePage] = useState(0);
   const [error, setError] = useState("");
   const [alarms, setAlarms] = useState<AlarmEvent[]>([]);
   const [pendingWrite, setPendingWrite] = useState<WriteRequest | null>(null);
+  const [showRecipes, setShowRecipes] = useState(false);
+  const [dsStatus, setDsStatus] = useState<Array<{ id: string; connected: boolean; tagCount: number }>>([]);
   const wsAlarmRef = useRef<WebSocket | null>(null);
 
   // Kiosk mode: ?kiosk or ?kiosk=1 hides nav bar and page switcher.
@@ -89,6 +172,20 @@ export function App() {
 
     load();
     const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Datasource status — poll every 5 s
+  useEffect(() => {
+    const poll = () =>
+      fetch("/api/v1/datasources")
+        .then((r) => (r.ok ? r.json() : []))
+        .then((data: Array<{ id: string; connected: boolean; tagCount: number }>) => {
+          if (Array.isArray(data)) setDsStatus(data);
+        })
+        .catch(() => {});
+    poll();
+    const t = setInterval(poll, 5000);
     return () => clearInterval(t);
   }, []);
 
@@ -183,6 +280,22 @@ export function App() {
         {!isKiosk && (
           <div className="flex items-center gap-3 px-4 py-2 border-b border-zinc-800 bg-zinc-900/60 shrink-0">
             <span className="font-semibold text-sm">X-HMI <span className="text-zinc-500 font-normal">Operator</span></span>
+            {/* Datasource connection status dots */}
+            {dsStatus.length > 0 && (
+              <div className="flex gap-1.5 items-center">
+                {dsStatus.map((d) => (
+                  <div
+                    key={d.id}
+                    title={`${d.id}: ${d.connected ? `connected (${d.tagCount} tags)` : "disconnected"}`}
+                    className="flex items-center gap-1"
+                  >
+                    <div className={`w-2 h-2 rounded-full ${d.connected ? "bg-emerald-500" : "bg-red-500"}`}
+                      style={{ boxShadow: d.connected ? "0 0 4px #22c55e88" : undefined }} />
+                    <span className="text-[10px] text-zinc-500 font-mono">{d.id}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="flex gap-1">
               {project.pages.map((p, i) => (
                 <button
@@ -202,6 +315,13 @@ export function App() {
                 ⚠ {activeAlarms.length} alarm{activeAlarms.length !== 1 ? "s" : ""}
               </div>
             )}
+            <button
+              onClick={() => setShowRecipes(true)}
+              title="Open recipes panel"
+              className="text-xs px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+            >
+              ⚙ Recipes
+            </button>
           </div>
         )}
 
@@ -289,6 +409,9 @@ export function App() {
           onCancel={() => setPendingWrite(null)}
         />
       )}
+
+      {/* Recipes slide-out panel */}
+      {showRecipes && <RecipesPanel onClose={() => setShowRecipes(false)} />}
     </WriteConfirmContext.Provider>
   );
 }

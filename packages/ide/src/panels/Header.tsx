@@ -100,6 +100,18 @@ export function Header() {
     }
   };
 
+  const loadDemo = async () => {
+    try {
+      const r = await fetch("/demo.xhmi.json");
+      if (!r.ok) throw new Error("not found");
+      const p = await r.json();
+      loadProject(p);
+      setMsg(`loaded demo: ${p.name}`);
+    } catch {
+      setMsg("demo not available");
+    }
+  };
+
   return (
     <div className="flex items-center gap-3 px-4 py-2 border-b border-zinc-800 bg-zinc-900/50">
       <div className="font-semibold text-sm">X-HMI <span className="text-zinc-500 font-normal">IDE</span></div>
@@ -170,6 +182,8 @@ export function Header() {
         className="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 font-mono">↪</button>
 
       {/* File save / load */}
+      <button onClick={loadDemo} title="Load built-in pump station demo project"
+        className="text-xs px-2 py-1 rounded bg-emerald-800 hover:bg-emerald-700 text-emerald-100">⚙ Demo</button>
       <button onClick={saveToFile} title="Save project to .xhmi.json file"
         className="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700" >↓ Save</button>
       <button onClick={() => fileInputRef.current?.click()} title="Load project from .xhmi.json file"
