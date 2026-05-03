@@ -82,6 +82,12 @@ export function useKeyboardShortcuts() {
         addWidget(activePageId, { ...w, id: newWidgetId(), y: nextY });
         return;
       }
+
+      // ? — toggle help modal (fires a custom event the App listens to)
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
+        window.dispatchEvent(new CustomEvent("xhmi:toggleHelp"));
+        return;
+      }
     };
 
     window.addEventListener("keydown", handler);

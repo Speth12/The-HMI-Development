@@ -108,10 +108,13 @@ export function Canvas() {
     >
       <div
         ref={gridRef}
-        className="grid gap-2 max-w-[1400px] mx-auto"
+        className="grid gap-2 max-w-[1400px] mx-auto relative"
         style={{
           gridTemplateColumns: `repeat(${COLS}, 1fr)`,
           gridAutoRows: `${ROW_H}px`,
+          backgroundImage: `radial-gradient(circle, #3f3f4644 1px, transparent 1px)`,
+          backgroundSize: `calc(100% / ${COLS}) ${ROW_H + GAP}px`,
+          backgroundPosition: `${GAP / 2}px ${GAP / 2}px`,
         }}
         onClick={() => selectWidget(null)}
       >
