@@ -462,17 +462,34 @@ function HistoryLogWidget({ w }: { w: Widget }) {
       .catch(() => {});
   }, [w.binding]);
 
+  const downloadCSV = () => {
+    if (!w.binding) return;
+    const from = (Date.now() - 3600_000) * 1e6;
+    const url = `${apiBase}/api/v1/history?path=${encodeURIComponent(w.binding)}&from=${from}&limit=10000&format=csv`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${w.binding.replace(/[:/]/g, "_")}.csv`;
+    a.click();
+  };
+
   return (
-    <div className="h-full overflow-auto text-[10px] font-mono space-y-0.5">
-      {rows.length === 0 && <div className="text-zinc-600 italic">No history</div>}
-      {[...rows].reverse().map((r, i) => (
-        <div key={i} className="flex gap-2 border-b border-zinc-800/50 pb-0.5">
-          <span className="text-zinc-600 shrink-0">
-            {new Date(r.ts > 1e15 ? r.ts / 1e6 : r.ts).toLocaleTimeString()}
-          </span>
-          <span className="text-zinc-300">{fmt(r.value)}</span>
-        </div>
-      ))}
+    <div className="h-full flex flex-col">
+      <div className="flex items-center justify-end mb-0.5 shrink-0">
+        <button onClick={downloadCSV} className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400">
+          ↓ CSV
+        </button>
+      </div>
+      <div className="flex-1 overflow-auto text-[10px] font-mono space-y-0.5">
+        {rows.length === 0 && <div className="text-zinc-600 italic">No history</div>}
+        {[...rows].reverse().map((r, i) => (
+          <div key={i} className="flex gap-2 border-b border-zinc-800/50 pb-0.5">
+            <span className="text-zinc-600 shrink-0">
+              {new Date(r.ts > 1e15 ? r.ts / 1e6 : r.ts).toLocaleTimeString()}
+            </span>
+            <span className="text-zinc-300">{fmt(r.value)}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

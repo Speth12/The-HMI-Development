@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -188,6 +189,22 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+
+	// If the client accepts CSV or format=csv is requested, return CSV.
+	accept := r.Header.Get("Accept")
+	if q.Get("format") == "csv" || strings.Contains(accept, "text/csv") {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="history.csv"`)
+		w.WriteHeader(200)
+		fmt.Fprintf(w, "timestamp,value,quality\n")
+		for _, smpl := range samples {
+			// TS is stored as nanoseconds since epoch.
+			t := time.Unix(0, smpl.TS)
+			fmt.Fprintf(w, "%s,%v,%s\n", t.UTC().Format(time.RFC3339Nano), smpl.Value, smpl.Quality)
+		}
+		return
+	}
+
 	writeJSON(w, 200, samples)
 }
 
