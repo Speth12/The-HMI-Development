@@ -315,3 +315,32 @@ export const useProject = create<State>((set, get) => {
 });
 
 export const newWidgetId = () => uid("w");
+
+// ── LocalStorage auto-save / auto-restore ──────────────────────────────────
+
+const LS_KEY = "xhmi-project-v1";
+
+/** Restore any previously saved project from localStorage on startup. */
+(function restoreFromStorage() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw) as Project;
+    if (saved && saved.version && Array.isArray(saved.pages)) {
+      useProject.getState().loadProject(saved);
+    }
+  } catch {
+    // ignore parse errors — blank project is fine
+  }
+})();
+
+/** Auto-save whenever anything in state changes (debounced 1 s, saves only project). */
+let _saveTimer: ReturnType<typeof setTimeout> | null = null;
+useProject.subscribe((state) => {
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(state.project));
+    } catch { /* storage full or private mode */ }
+  }, 1000);
+});

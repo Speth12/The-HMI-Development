@@ -206,8 +206,10 @@ function AddDatasourceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (d
   const [mqttPort, setMqttPort]             = useState(1883);
   const [basePath, setBasePath]             = useState("/_pxc_api/v1.14");
   const [bearerToken, setBearerToken]       = useState("");
-  // Virtual/computed tags
-  const [virtualTags, setVirtualTags]       = useState('[{"path":"tempF","formula":"{opcua:Temp}*9/5+32"}]');
+  // Virtual/computed tags — stored as structured array for form editing
+  const [virtualRows, setVirtualRows]       = useState<{ path: string; formula: string }[]>([
+    { path: "tempF", formula: "{opcua:Temp}*9/5+32" },
+  ]);
   // test connection
   const [testing, setTesting]               = useState(false);
   const [testResult, setTestResult]         = useState<{ ok: boolean; msg: string } | null>(null);
@@ -234,7 +236,7 @@ function AddDatasourceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (d
       config.host = ip;
       config.port = mqttPort || 1883;
     } else if (type === "virtual") {
-      config.tags = virtualTags;
+      config.tags = JSON.stringify(virtualRows.filter((r) => r.path.trim()));
     } else {
       config.endpoint = `https://${ip}`;
       config.basePath = basePath;
@@ -371,20 +373,51 @@ function AddDatasourceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (d
 
         {/* Virtual (computed) extras */}
         {type === "virtual" && (
-          <label className={labelCls}>
-            Tag specs <span className="text-zinc-600">(JSON array)</span>
-            <div className="text-[10px] text-zinc-500 mb-1">
-              Each entry: <span className="font-mono">{`{"path":"name","formula":"expr"}`}</span><br/>
-              Reference tags: <span className="font-mono">{`{dsId:tagPath}`}</span> · Math: <span className="font-mono">+−*/abs()min()max()clamp()</span>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] text-zinc-300">Computed Tags</span>
+              <button
+                onClick={() => setVirtualRows((r) => [...r, { path: "", formula: "" }])}
+                className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700"
+              >
+                + add tag
+              </button>
             </div>
-            <textarea
-              value={virtualTags}
-              onChange={(e) => setVirtualTags(e.target.value)}
-              rows={4}
-              className={`${inputCls} font-mono resize-y`}
-              spellCheck={false}
-            />
-          </label>
+            <div className="text-[10px] text-zinc-600 mb-1.5">
+              Formula: <span className="font-mono text-zinc-500">{`{dsId:tagPath}`}</span> ·{" "}
+              <span className="font-mono text-zinc-500">abs() min() max() clamp() sqrt() pow()</span>
+            </div>
+            <div className="space-y-1.5 max-h-44 overflow-y-auto pr-0.5">
+              {virtualRows.map((row, i) => (
+                <div key={i} className="flex gap-1.5 items-center">
+                  <input
+                    value={row.path}
+                    onChange={(e) => setVirtualRows((rows) => rows.map((r, j) => j === i ? { ...r, path: e.target.value } : r))}
+                    placeholder="tagName"
+                    className="w-24 shrink-0 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-[11px] font-mono focus:outline-none focus:border-zinc-600"
+                  />
+                  <span className="text-zinc-600 text-[10px] shrink-0">=</span>
+                  <input
+                    value={row.formula}
+                    onChange={(e) => setVirtualRows((rows) => rows.map((r, j) => j === i ? { ...r, formula: e.target.value } : r))}
+                    placeholder="{ds:path} * 9/5 + 32"
+                    className="flex-1 min-w-0 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-[11px] font-mono focus:outline-none focus:border-zinc-600"
+                  />
+                  <button
+                    onClick={() => setVirtualRows((rows) => rows.filter((_, j) => j !== i))}
+                    className="text-zinc-600 hover:text-red-400 text-xs shrink-0 px-1"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {virtualRows.length === 0 && (
+                <div className="text-[10px] text-zinc-600 italic text-center py-2">
+                  No tags — click <span className="font-semibold">+ add tag</span>
+                </div>
+              )}
+            </div>
+          </div>
         )}
 
         {/* Preview line */}
@@ -393,7 +426,7 @@ function AddDatasourceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (d
           {type === "mbtcp"   && `${ip}:${mbPort}  slave=${slaveId}`}
           {type === "mqtt"    && `${ip}:${mqttPort}`}
           {type === "rest"    && `https://${ip}${basePath}`}
-          {type === "virtual" && `${(() => { try { return JSON.parse(virtualTags).length; } catch { return "?"; } })()} computed tag(s)`}
+          {type === "virtual" && `${virtualRows.filter((r) => r.path.trim()).length} computed tag(s)`}
         </div>
 
         <div className="flex items-center gap-2 pt-1">

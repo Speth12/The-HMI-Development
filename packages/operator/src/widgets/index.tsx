@@ -296,8 +296,18 @@ function useSeries(binding: string | undefined, duration: number): Sample[] {
   return pts;
 }
 
+const TREND_WINDOWS = [
+  { label: "30s", sec: 30 },
+  { label: "1m",  sec: 60 },
+  { label: "5m",  sec: 300 },
+  { label: "1h",  sec: 3600 },
+];
+
 function TrendWidget({ w }: { w: Widget }) {
-  const duration = ((w.config?.duration as number) ?? 300) * 1000;
+  const cfgDuration = (w.config?.duration as number) ?? 300;
+  const [windowSec, setWindowSec] = useState(cfgDuration);
+  const duration = windowSec * 1000;
+
   const cfgTags = w.config?.tags as TrendSeries[] | undefined;
   const series: TrendSeries[] = cfgTags?.length ? cfgTags
     : w.binding ? [{ binding: w.binding, color: SERIES_COLORS[0]! }] : [];
@@ -325,6 +335,15 @@ function TrendWidget({ w }: { w: Widget }) {
 
   return (
     <div className="flex flex-col h-full">
+      {/* Time-window picker */}
+      <div className="flex gap-1 shrink-0 mb-0.5">
+        {TREND_WINDOWS.map((tw) => (
+          <button key={tw.sec} onClick={() => setWindowSec(tw.sec)}
+            className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${windowSec === tw.sec ? "bg-blue-600 text-white" : "bg-zinc-800 text-zinc-500 hover:bg-zinc-700"}`}>
+            {tw.label}
+          </button>
+        ))}
+      </div>
       <svg className="flex-1 w-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
         {[0,25,50,75,100].map((y) => (
           <line key={y} x1="0" y1={y} x2="100" y2={y} stroke="#27272a" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
