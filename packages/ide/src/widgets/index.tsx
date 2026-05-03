@@ -53,31 +53,81 @@ function Frame({ w, children }: { w: Widget; children: React.ReactNode }) {
 
 // ── read-only widgets ──────────────────────────────────────────────────────
 
+// Gauge SVG helpers
+const GAUGE_CX = 50, GAUGE_CY = 60, GAUGE_R = 36;
+const GAUGE_START = 225; // deg clockwise from top (7:30 position)
+const GAUGE_SWEEP = 270; // total arc in degrees
+
+function gaugePolar(angleDeg: number, r = GAUGE_R) {
+  const rad = (angleDeg - 90) * Math.PI / 180;
+  return { x: GAUGE_CX + r * Math.cos(rad), y: GAUGE_CY + r * Math.sin(rad) };
+}
+
+function gaugeArcPath(startDeg: number, sweepDeg: number): string {
+  const s = Math.max(0.01, Math.min(sweepDeg, GAUGE_SWEEP - 0.01));
+  const p0 = gaugePolar(startDeg);
+  const p1 = gaugePolar(startDeg + s);
+  return `M ${p0.x.toFixed(2)} ${p0.y.toFixed(2)} A ${GAUGE_R} ${GAUGE_R} 0 ${s > 180 ? 1 : 0} 1 ${p1.x.toFixed(2)} ${p1.y.toFixed(2)}`;
+}
+
 function GaugeWidget({ w }: { w: Widget }) {
   const t = useTag(w.binding);
   const min = (w.config?.min as number) ?? 0;
   const max = (w.config?.max as number) ?? 100;
-  const v = typeof t.value === "number" ? t.value : 0;
-  const pct = Math.max(0, Math.min(100, ((v - min) / (max - min)) * 100));
+  const v = typeof t.value === "number" ? t.value : min;
+  const pct = Math.max(0, Math.min(1, (v - min) / (max - min)));
+  const fillSweep = pct * GAUGE_SWEEP;
+
   const thresholds = (w.config?.thresholds as Array<{ value: number; color: string }>) ?? [];
-  let barColor = "bg-emerald-500";
-  let inlineColor: string | undefined;
-  thresholds.forEach((th) => {
-    if (v >= th.value) { barColor = ""; inlineColor = th.color; }
-  });
+  let arcColor = "#22c55e";
+  thresholds.forEach((th) => { if (v >= th.value) arcColor = th.color; });
+
+  const needleAngle = GAUGE_START + fillSweep;
+  const needleTip  = gaugePolar(needleAngle, GAUGE_R - 4);
+  const needleBase = gaugePolar(needleAngle + 180, 6);
+
+  const minPt = gaugePolar(GAUGE_START, GAUGE_R + 6);
+  const maxPt = gaugePolar(GAUGE_START + GAUGE_SWEEP, GAUGE_R + 6);
+
   return (
-    <div className="flex flex-col h-full justify-center">
-      <div className="text-3xl font-semibold tabular-nums">
-        {fmt(t.value)}
-        {w.config?.unit ? <span className="text-base text-zinc-500 ml-1">{w.config.unit as string}</span> : null}
-      </div>
-      <div className="h-2 mt-2 rounded bg-zinc-800 overflow-hidden">
-        <div
-          className={`h-full ${barColor}`}
-          style={{ width: `${pct}%`, ...(inlineColor ? { background: inlineColor } : {}) }}
-        />
-      </div>
-      <div className={`text-[10px] mt-1 ${qualityColor[t.quality] ?? "text-zinc-500"}`}>{t.quality}</div>
+    <div className="flex flex-col h-full justify-center gap-0.5">
+      <svg viewBox="0 0 100 75" className="w-full max-h-28">
+        {/* Track */}
+        <path d={gaugeArcPath(GAUGE_START, GAUGE_SWEEP)} fill="none" stroke="#27272a" strokeWidth="7" strokeLinecap="round" />
+        {/* Fill */}
+        {fillSweep > 0.5 && (
+          <path d={gaugeArcPath(GAUGE_START, fillSweep)} fill="none" stroke={arcColor} strokeWidth="7" strokeLinecap="round" />
+        )}
+        {/* Tick marks at 0%, 25%, 50%, 75%, 100% */}
+        {[0, 0.25, 0.5, 0.75, 1].map((p) => {
+          const a = GAUGE_START + p * GAUGE_SWEEP;
+          const outer = gaugePolar(a, GAUGE_R + 2);
+          const inner = gaugePolar(a, GAUGE_R - 9);
+          return (
+            <line key={p} x1={outer.x.toFixed(2)} y1={outer.y.toFixed(2)}
+              x2={inner.x.toFixed(2)} y2={inner.y.toFixed(2)}
+              stroke="#52525b" strokeWidth={p === 0 || p === 1 ? 1.5 : 0.8} />
+          );
+        })}
+        {/* Min/max labels */}
+        <text x={minPt.x.toFixed(1)} y={minPt.y.toFixed(1)} textAnchor="end"
+          fontSize="5" fill="#52525b" fontFamily="monospace">{min}</text>
+        <text x={maxPt.x.toFixed(1)} y={maxPt.y.toFixed(1)} textAnchor="start"
+          fontSize="5" fill="#52525b" fontFamily="monospace">{max}</text>
+        {/* Needle */}
+        <line x1={needleBase.x.toFixed(2)} y1={needleBase.y.toFixed(2)}
+          x2={needleTip.x.toFixed(2)} y2={needleTip.y.toFixed(2)}
+          stroke="#e4e4e7" strokeWidth="1.5" strokeLinecap="round" />
+        <circle cx={GAUGE_CX} cy={GAUGE_CY} r="3.5" fill="#52525b" />
+        <circle cx={GAUGE_CX} cy={GAUGE_CY} r="1.5" fill="#a1a1aa" />
+        {/* Value */}
+        <text x={GAUGE_CX} y={GAUGE_CY + 14} textAnchor="middle"
+          fontSize="8" fill="#e4e4e7" fontWeight="600" fontFamily="monospace">
+          {typeof t.value === "number" ? t.value.toFixed(1) : "—"}
+          {w.config?.unit ? ` ${w.config.unit as string}` : ""}
+        </text>
+      </svg>
+      <div className={`text-[9px] text-center ${qualityColor[t.quality] ?? "text-zinc-600"}`}>{t.quality}</div>
     </div>
   );
 }
