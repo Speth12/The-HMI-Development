@@ -72,6 +72,78 @@ function WriteConfirmDialog({ req, onConfirm, onCancel }: {
   );
 }
 
+// ── Alarm log panel ────────────────────────────────────────────────────────
+const severityRowBg: Record<string, string> = {
+  critical: "border-red-800 bg-red-950/30",
+  warning:  "border-amber-800 bg-amber-950/30",
+  info:     "border-blue-800 bg-blue-950/30",
+};
+const severityText: Record<string, string> = {
+  critical: "text-red-400",
+  warning:  "text-amber-400",
+  info:     "text-blue-400",
+};
+
+function AlarmLogPanel({ alarms, onAck, onClose }: {
+  alarms: AlarmEvent[];
+  onAck: (id: string) => void;
+  onClose: () => void;
+}) {
+  const sorted = [...alarms].sort((a, b) =>
+    new Date(b.triggeredAt).getTime() - new Date(a.triggeredAt).getTime()
+  );
+
+  return (
+    <div className="fixed inset-0 z-40 flex" onClick={onClose}>
+      <div className="flex-1" />
+      <div
+        className="w-96 bg-zinc-900 border-l border-zinc-700 flex flex-col h-full shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+          <span className="text-sm font-semibold">Alarm Log</span>
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] text-zinc-500">{alarms.length} events</span>
+            <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 text-lg leading-none">×</button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+          {sorted.length === 0 && (
+            <div className="text-zinc-600 text-xs italic text-center pt-6">No alarm events</div>
+          )}
+          {sorted.map((ev) => (
+            <div
+              key={ev.id}
+              className={`rounded border px-3 py-2 ${ev.active && !ev.acked ? severityRowBg[ev.severity] ?? "border-zinc-700" : "border-zinc-800 bg-zinc-900/40"}`}
+            >
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-bold ${ev.active ? (severityText[ev.severity] ?? "text-zinc-400") : "text-zinc-600"}`}>
+                  {ev.active ? "●" : "○"} {ev.severity.toUpperCase()}
+                </span>
+                <span className="text-[11px] font-medium flex-1 truncate">{ev.ruleName}</span>
+                {ev.active && !ev.acked && (
+                  <button
+                    onClick={() => onAck(ev.id)}
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-700 hover:bg-zinc-600 shrink-0"
+                  >
+                    ACK
+                  </button>
+                )}
+                {ev.acked && <span className="text-[10px] text-zinc-600 shrink-0">acked</span>}
+                {!ev.active && !ev.acked && <span className="text-[10px] text-emerald-700 shrink-0">normal</span>}
+              </div>
+              {ev.message && <div className="text-[10px] text-zinc-400 mt-0.5 truncate">{ev.message}</div>}
+              <div className="text-[10px] text-zinc-600 font-mono mt-0.5">
+                {`val=${ev.value.toFixed(2)} · ${new Date(ev.triggeredAt).toLocaleTimeString()}`}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Recipes panel ─────────────────────────────────────────────────────────
 function RecipesPanel({ onClose }: { onClose: () => void }) {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -153,6 +225,7 @@ export function App() {
   const [alarms, setAlarms] = useState<AlarmEvent[]>([]);
   const [pendingWrite, setPendingWrite] = useState<WriteRequest | null>(null);
   const [showRecipes, setShowRecipes] = useState(false);
+  const [showAlarmLog, setShowAlarmLog] = useState(false);
   const [dsStatus, setDsStatus] = useState<Array<{ id: string; connected: boolean; tagCount: number }>>([]);
   const wsAlarmRef = useRef<WebSocket | null>(null);
 
@@ -316,6 +389,13 @@ export function App() {
               </div>
             )}
             <button
+              onClick={() => setShowAlarmLog(true)}
+              title="Open alarm log"
+              className={`text-xs px-2 py-0.5 rounded text-zinc-300 ${alarms.length > 0 ? "bg-amber-800 hover:bg-amber-700" : "bg-zinc-800 hover:bg-zinc-700"}`}
+            >
+              🔔 Alarm Log
+            </button>
+            <button
               onClick={() => setShowRecipes(true)}
               title="Open recipes panel"
               className="text-xs px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
@@ -412,6 +492,15 @@ export function App() {
 
       {/* Recipes slide-out panel */}
       {showRecipes && <RecipesPanel onClose={() => setShowRecipes(false)} />}
+
+      {/* Alarm log slide-out panel */}
+      {showAlarmLog && (
+        <AlarmLogPanel
+          alarms={alarms}
+          onAck={ack}
+          onClose={() => setShowAlarmLog(false)}
+        />
+      )}
     </WriteConfirmContext.Provider>
   );
 }
