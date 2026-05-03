@@ -185,10 +185,11 @@ export function Header() {
 }
 
 const TYPE_DEFAULTS: Record<DatasourceType, { id: string; label: string }> = {
-  opcua: { id: "opcua", label: "OPC UA" },
-  mbtcp: { id: "mb",    label: "Modbus TCP" },
-  mqtt:  { id: "mqtt",  label: "MQTT" },
-  rest:  { id: "rest",  label: "PLCnext REST" },
+  opcua:   { id: "opcua",  label: "OPC UA" },
+  mbtcp:   { id: "mb",     label: "Modbus TCP" },
+  mqtt:    { id: "mqtt",   label: "MQTT" },
+  rest:    { id: "rest",   label: "PLCnext REST" },
+  virtual: { id: "calc",   label: "Computed Tags" },
 };
 
 function AddDatasourceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (ds: { id: string; type: DatasourceType; label: string; config: Record<string, unknown> }) => void }) {
@@ -205,6 +206,8 @@ function AddDatasourceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (d
   const [mqttPort, setMqttPort]             = useState(1883);
   const [basePath, setBasePath]             = useState("/_pxc_api/v1.14");
   const [bearerToken, setBearerToken]       = useState("");
+  // Virtual/computed tags
+  const [virtualTags, setVirtualTags]       = useState('[{"path":"tempF","formula":"{opcua:Temp}*9/5+32"}]');
   // test connection
   const [testing, setTesting]               = useState(false);
   const [testResult, setTestResult]         = useState<{ ok: boolean; msg: string } | null>(null);
@@ -230,6 +233,8 @@ function AddDatasourceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (d
     } else if (type === "mqtt") {
       config.host = ip;
       config.port = mqttPort || 1883;
+    } else if (type === "virtual") {
+      config.tags = virtualTags;
     } else {
       config.endpoint = `https://${ip}`;
       config.basePath = basePath;
@@ -282,6 +287,7 @@ function AddDatasourceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (d
             <option value="mbtcp">Modbus TCP</option>
             <option value="mqtt">MQTT</option>
             <option value="rest">REST (PLCnext pxc_api)</option>
+            <option value="virtual">Virtual (computed expressions)</option>
           </select>
         </label>
 
@@ -296,10 +302,12 @@ function AddDatasourceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (d
           </label>
         </div>
 
-        {/* IP — shared by all types */}
-        <label className={labelCls}>IP Address
-          <input value={ip} onChange={(e) => setIp(e.target.value)} placeholder="10.0.0.210" className={inputCls} />
-        </label>
+        {/* IP — shared by network types (not virtual) */}
+        {type !== "virtual" && (
+          <label className={labelCls}>IP Address
+            <input value={ip} onChange={(e) => setIp(e.target.value)} placeholder="10.0.0.210" className={inputCls} />
+          </label>
+        )}
 
         {/* OPC UA extras */}
         {type === "opcua" && (<>
@@ -361,12 +369,31 @@ function AddDatasourceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (d
           </label>
         </>)}
 
+        {/* Virtual (computed) extras */}
+        {type === "virtual" && (
+          <label className={labelCls}>
+            Tag specs <span className="text-zinc-600">(JSON array)</span>
+            <div className="text-[10px] text-zinc-500 mb-1">
+              Each entry: <span className="font-mono">{`{"path":"name","formula":"expr"}`}</span><br/>
+              Reference tags: <span className="font-mono">{`{dsId:tagPath}`}</span> · Math: <span className="font-mono">+−*/abs()min()max()clamp()</span>
+            </div>
+            <textarea
+              value={virtualTags}
+              onChange={(e) => setVirtualTags(e.target.value)}
+              rows={4}
+              className={`${inputCls} font-mono resize-y`}
+              spellCheck={false}
+            />
+          </label>
+        )}
+
         {/* Preview line */}
         <div className="text-[10px] text-zinc-600 font-mono truncate">
-          {type === "opcua" && `opc.tcp://${ip}:${opcuaPort}`}
-          {type === "mbtcp" && `${ip}:${mbPort}  slave=${slaveId}`}
-          {type === "mqtt"  && `${ip}:${mqttPort}`}
-          {type === "rest"  && `https://${ip}${basePath}`}
+          {type === "opcua"   && `opc.tcp://${ip}:${opcuaPort}`}
+          {type === "mbtcp"   && `${ip}:${mbPort}  slave=${slaveId}`}
+          {type === "mqtt"    && `${ip}:${mqttPort}`}
+          {type === "rest"    && `https://${ip}${basePath}`}
+          {type === "virtual" && `${(() => { try { return JSON.parse(virtualTags).length; } catch { return "?"; } })()} computed tag(s)`}
         </div>
 
         <div className="flex items-center gap-2 pt-1">

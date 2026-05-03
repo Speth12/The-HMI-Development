@@ -16,7 +16,7 @@ export type Widget = {
 
 export type Page = { id: string; name: string; widgets: Widget[] };
 
-export type DatasourceType = "opcua" | "mbtcp" | "mqtt" | "rest";
+export type DatasourceType = "opcua" | "mbtcp" | "mqtt" | "rest" | "virtual";
 export type Datasource = {
   id: string;
   type: DatasourceType;

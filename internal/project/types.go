@@ -54,24 +54,26 @@ type DatasourceElement struct {
 
 // Driver-specific connection config. Fields used depend on 'type'.
 type DatasourceConfig struct {
-	// REST base path, e.g. /_pxc_api/                
+	// REST base path, e.g. /_pxc_api/
 	BasePath                          *string         `json:"basePath,omitempty"`
-	// REST bearer token                              
+	// REST bearer token
 	BearerToken                       *string         `json:"bearerToken,omitempty"`
-	// MQTT client ID                                 
+	// MQTT client ID
 	ClientID                          *string         `json:"clientId,omitempty"`
-	// OPC UA: opc.tcp://host:port                    
+	// OPC UA: opc.tcp://host:port
 	Endpoint                          *string         `json:"endpoint,omitempty"`
-	// Modbus/MQTT/REST host                          
+	// Modbus/MQTT/REST host
 	Host                              *string         `json:"host,omitempty"`
 	Password                          *string         `json:"password,omitempty"`
-	// TCP port                                       
+	// TCP port
 	Port                              *int64          `json:"port,omitempty"`
 	SecurityMode                      *SecurityMode   `json:"securityMode,omitempty"`
 	SecurityPolicy                    *SecurityPolicy `json:"securityPolicy,omitempty"`
-	// Modbus slave/unit ID                           
+	// Modbus slave/unit ID
 	SlaveID                           *int64          `json:"slaveId,omitempty"`
 	Username                          *string         `json:"username,omitempty"`
+	// Virtual driver: JSON-encoded []TagSpec — [{path,formula}...]
+	Tags                              *string         `json:"tags,omitempty"`
 }
 
 type PageElement struct {
@@ -147,10 +149,11 @@ const (
 type DatasourceType string
 
 const (
-	Mbtcp DatasourceType = "mbtcp"
-	Mqtt  DatasourceType = "mqtt"
-	Opcua DatasourceType = "opcua"
-	REST  DatasourceType = "rest"
+	Mbtcp   DatasourceType = "mbtcp"
+	Mqtt    DatasourceType = "mqtt"
+	Opcua   DatasourceType = "opcua"
+	REST    DatasourceType = "rest"
+	Virtual DatasourceType = "virtual"
 )
 
 type WidgetType string

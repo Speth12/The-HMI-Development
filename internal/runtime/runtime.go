@@ -14,6 +14,7 @@ import (
 	"github.com/Speth12/x-hmi/internal/drivers/mqtt"
 	"github.com/Speth12/x-hmi/internal/drivers/opcua"
 	"github.com/Speth12/x-hmi/internal/drivers/rest"
+	"github.com/Speth12/x-hmi/internal/drivers/virtual"
 	"github.com/Speth12/x-hmi/internal/historian"
 	"github.com/Speth12/x-hmi/internal/project"
 	"github.com/Speth12/x-hmi/internal/tagstore"
@@ -110,7 +111,7 @@ func (r *Runtime) LoadProject(ctx context.Context, p *project.Project) error {
 	// connect new datasources, then subscribe all (new and existing) to bound tags
 	for _, ds := range p.Datasources {
 		if !r.has(ds.ID) {
-			drv, err := buildDriver(ds.Type)
+			drv, err := r.buildDriver(ds.Type)
 			if err != nil {
 				log.Printf("[RUNTIME] %s: %v — skipped", ds.ID, err)
 				continue
@@ -166,7 +167,7 @@ func (r *Runtime) LoadProject(ctx context.Context, p *project.Project) error {
 // TestDatasource creates a temporary driver, attempts to connect within 10 s,
 // returns its status, then disconnects. Safe to call concurrently.
 func (r *Runtime) TestDatasource(ctx context.Context, ds project.DatasourceElement) drivers.DriverStatus {
-	drv, err := buildDriver(ds.Type)
+	drv, err := r.buildDriver(ds.Type)
 	if err != nil {
 		return drivers.DriverStatus{LastError: err.Error()}
 	}
@@ -241,7 +242,7 @@ func (r *Runtime) pump(ctx context.Context) {
 // PumpChan returns the channel drivers push into. Exposed for runtime tests.
 func (r *Runtime) PumpChan() chan<- tagstore.TagUpdate { return r.pumpCh }
 
-func buildDriver(typ project.DatasourceType) (drivers.ProtocolDriver, error) {
+func (r *Runtime) buildDriver(typ project.DatasourceType) (drivers.ProtocolDriver, error) {
 	switch typ {
 	case project.DatasourceTypeOPCUA:
 		return opcua.New(), nil
@@ -251,6 +252,8 @@ func buildDriver(typ project.DatasourceType) (drivers.ProtocolDriver, error) {
 		return modbus.New(), nil
 	case project.DatasourceTypeREST:
 		return rest.New(), nil
+	case project.DatasourceTypeVirtual:
+		return virtual.New(r.Store), nil
 	}
 	return nil, fmt.Errorf("unknown datasource type %q", typ)
 }
@@ -290,6 +293,9 @@ func buildConfig(ds project.DatasourceElement) drivers.DriverConfig {
 	}
 	if c.BearerToken != nil {
 		cfg.Extra["bearerToken"] = *c.BearerToken
+	}
+	if c.Tags != nil {
+		cfg.Extra["tags"] = *c.Tags
 	}
 	return cfg
 }
