@@ -216,3 +216,82 @@ func (s *Server) handleAckAlarm(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
+
+// ── Recipes ────────────────────────────────────────────────────────────────
+
+func (s *Server) handleListRecipes(w http.ResponseWriter, r *http.Request) {
+	p := s.rt.Project()
+	if p == nil || len(p.Recipes) == 0 {
+		writeJSON(w, 200, []struct{}{})
+		return
+	}
+	writeJSON(w, 200, p.Recipes)
+}
+
+func (s *Server) handleApplyRecipe(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	p := s.rt.Project()
+	if p == nil {
+		writeErr(w, 503, "no project loaded")
+		return
+	}
+
+	var recipe *struct {
+		ID      string
+		Entries []struct {
+			Binding string `json:"binding"`
+			Value   any    `json:"value"`
+		}
+	}
+	for _, rec := range p.Recipes {
+		if rec.ID == id {
+			recipe = &struct {
+				ID      string
+				Entries []struct {
+					Binding string `json:"binding"`
+					Value   any    `json:"value"`
+				}
+			}{ID: rec.ID}
+			for _, e := range rec.Entries {
+				recipe.Entries = append(recipe.Entries, struct {
+					Binding string `json:"binding"`
+					Value   any    `json:"value"`
+				}{Binding: e.Binding, Value: e.Value})
+			}
+			break
+		}
+	}
+	if recipe == nil {
+		writeErr(w, 404, "recipe not found")
+		return
+	}
+
+	var errs []string
+	for _, entry := range recipe.Entries {
+		sep := strings.Index(entry.Binding, ":")
+		if sep < 0 {
+			errs = append(errs, "bad binding: "+entry.Binding)
+			continue
+		}
+		dsID := entry.Binding[:sep]
+		tagPath := entry.Binding[sep+1:]
+		d := s.rt.Driver(dsID)
+		if d == nil {
+			errs = append(errs, "driver not found: "+dsID)
+			continue
+		}
+		if err := d.Write(r.Context(), tagPath, entry.Value); err != nil {
+			errs = append(errs, entry.Binding+": "+err.Error())
+			continue
+		}
+		if s.rt.Historian != nil {
+			_ = s.rt.Historian.RecordWrite(entry.Binding, entry.Value)
+		}
+	}
+
+	if len(errs) > 0 {
+		writeJSON(w, 207, map[string]any{"ok": false, "errors": errs, "applied": len(recipe.Entries) - len(errs)})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "applied": len(recipe.Entries)})
+}

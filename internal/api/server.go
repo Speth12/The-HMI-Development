@@ -72,6 +72,11 @@ func (s *Server) routes(assets http.Handler) {
 			r.Get("/", s.handleListAlarms)
 			r.Post("/{id}/ack", s.handleAckAlarm)
 		})
+
+		r.Route("/recipes", func(r chi.Router) {
+			r.Get("/", s.handleListRecipes)
+			r.Post("/{id}/apply", s.handleApplyRecipe)
+		})
 	})
 
 	r.Get("/ws/tags", s.handleWS)

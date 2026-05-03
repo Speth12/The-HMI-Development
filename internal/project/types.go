@@ -4,13 +4,30 @@ package project
 // + packages/shared-types/src/project.ts
 type Types struct {
 	// Alarm rules evaluated against live tag values
-	AlarmRules                     []AlarmRule         `json:"alarmRules,omitempty"`
-	Datasources                    []DatasourceElement `json:"datasources"`
+	AlarmRules  []AlarmRule         `json:"alarmRules,omitempty"`
+	Datasources []DatasourceElement `json:"datasources"`
 	// Human-readable project name
-	Name                           *string             `json:"name,omitempty"`
-	Pages                          []PageElement       `json:"pages"`
+	Name    *string       `json:"name,omitempty"`
+	Pages   []PageElement `json:"pages"`
+	// Named parameter sets for batch writes
+	Recipes []Recipe      `json:"recipes,omitempty"`
 	// Schema version, e.g. '0.1.0'
-	Version                        string              `json:"version"`
+	Version string `json:"version"`
+}
+
+// Recipe is a named set of tag write operations applied atomically.
+type Recipe struct {
+	ID          string        `json:"id"`
+	Name        string        `json:"name"`
+	Description string        `json:"description,omitempty"`
+	Entries     []RecipeEntry `json:"entries"`
+}
+
+// RecipeEntry is a single binding→value pair in a recipe.
+type RecipeEntry struct {
+	// "datasource_id:tag_path"
+	Binding string `json:"binding"`
+	Value   any    `json:"value"`
 }
 
 // AlarmRule defines when an alarm should fire based on a tag value.

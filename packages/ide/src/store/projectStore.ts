@@ -37,12 +37,25 @@ export type AlarmRule = {
   message: string;
 };
 
+export type RecipeEntry = {
+  binding: string;   // "dsId:tagPath"
+  value: unknown;    // value to write
+};
+
+export type Recipe = {
+  id: string;
+  name: string;
+  description?: string;
+  entries: RecipeEntry[];
+};
+
 export type Project = {
   version: string;
   name?: string;
   datasources: Datasource[];
   pages: Page[];
   alarmRules?: AlarmRule[];
+  recipes?: Recipe[];
 };
 
 const MAX_HISTORY = 50;
@@ -77,6 +90,10 @@ type State = {
   addAlarmRule: (rule: AlarmRule) => void;
   updateAlarmRule: (id: string, patch: Partial<AlarmRule>) => void;
   removeAlarmRule: (id: string) => void;
+
+  addRecipe: (recipe: Recipe) => void;
+  updateRecipe: (id: string, patch: Partial<Recipe>) => void;
+  removeRecipe: (id: string) => void;
 
   loadProject: (p: Project) => void;
   exportJSON: () => string;
@@ -249,6 +266,31 @@ export const useProject = create<State>((set, get) => {
         project: {
           ...s.project,
           alarmRules: (s.project.alarmRules ?? []).filter((r) => r.id !== id),
+        },
+      }));
+    },
+
+    addRecipe: (recipe) => {
+      pushHistory();
+      set((s) => ({ project: { ...s.project, recipes: [...(s.project.recipes ?? []), recipe] } }));
+    },
+
+    updateRecipe: (id, patch) => {
+      pushHistory();
+      set((s) => ({
+        project: {
+          ...s.project,
+          recipes: (s.project.recipes ?? []).map((r) => (r.id === id ? { ...r, ...patch } : r)),
+        },
+      }));
+    },
+
+    removeRecipe: (id) => {
+      pushHistory();
+      set((s) => ({
+        project: {
+          ...s.project,
+          recipes: (s.project.recipes ?? []).filter((r) => r.id !== id),
         },
       }));
     },

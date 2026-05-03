@@ -7,11 +7,12 @@ import { Palette } from "./panels/Palette";
 import { Properties } from "./panels/Properties";
 import { TagBrowser } from "./panels/TagBrowser";
 import { Alarms, AlarmBadge } from "./panels/Alarms";
+import { Recipes } from "./panels/Recipes";
 import { StatusBar } from "./panels/StatusBar";
 import { useProject } from "./store/projectStore";
 
 export function App() {
-  const [rightTab, setRightTab] = useState<"alarms" | "json">("alarms");
+  const [rightTab, setRightTab] = useState<"alarms" | "recipes" | "json">("alarms");
   useKeyboardShortcuts();
 
   return (
@@ -38,7 +39,7 @@ export function App() {
         <div className="border-l border-zinc-800 bg-zinc-900/50 flex flex-col min-h-0">
           {/* Tab bar */}
           <div className="flex border-b border-zinc-800 shrink-0">
-            {(["alarms", "json"] as const).map((tab) => (
+            {(["alarms", "recipes", "json"] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setRightTab(tab)}
@@ -52,7 +53,7 @@ export function App() {
               </button>
             ))}
           </div>
-          {rightTab === "alarms" ? <Alarms /> : <ProjectJSONPanel />}
+          {rightTab === "alarms" ? <Alarms /> : rightTab === "recipes" ? <Recipes /> : <ProjectJSONPanel />}
         </div>
       </div>
       <StatusBar />
