@@ -12,6 +12,7 @@ const items: { type: WidgetType; label: string; w: number; h: number }[] = [
   { type: "numericInput",   label: "Numeric In", w: 3, h: 2 },
   { type: "textInput",      label: "Text In",    w: 3, h: 2 },
   { type: "historyLog",     label: "History",    w: 6, h: 4 },
+  { type: "multiState",    label: "Multi-State", w: 3, h: 2 },
 ];
 
 export function Palette() {

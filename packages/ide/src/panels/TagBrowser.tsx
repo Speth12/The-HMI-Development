@@ -1,9 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useProject } from "../store/projectStore";
 import { apiBase } from "../store/runtimeTarget";
+import { tagStoreClient, type TagState } from "../store/tagStoreClient";
 
 type TagDef = { Path: string; Description?: string; Writable?: boolean };
 type DSStatus = { connected: boolean; lastError: string; tagCount: number };
+
+function fmtValue(s: TagState | undefined): string {
+  if (!s) return "";
+  const v = s.value;
+  if (v == null) return "—";
+  if (typeof v === "number") {
+    return Number.isInteger(v) ? String(v) : v.toFixed(3);
+  }
+  if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
+  if (typeof v === "string") return v.length > 16 ? v.slice(0, 16) + "…" : v;
+  return JSON.stringify(v).slice(0, 20);
+}
 
 export function TagBrowser() {
   const { project, selectedWidgetId, activePageId, updateWidget } = useProject();
@@ -11,6 +24,9 @@ export function TagBrowser() {
   const [statusByDS, setStatusByDS] = useState<Record<string, DSStatus | null>>({});
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState("");
+  // Live values: keyed by "dsId:path"
+  const [liveValues, setLiveValues] = useState<Record<string, TagState>>({});
+  const unsubsRef = useRef<Array<() => void>>([]);
 
   const refresh = async () => {
     setBusy(true);
@@ -36,6 +52,33 @@ export function TagBrowser() {
   };
 
   useEffect(() => { void refresh(); /* eslint-disable-next-line */ }, [project.datasources.length]);
+
+  // Subscribe to live values whenever the tag list changes.
+  useEffect(() => {
+    // Unsubscribe from previous set.
+    unsubsRef.current.forEach((u) => u());
+    unsubsRef.current = [];
+    const nextValues: Record<string, TagState> = {};
+
+    for (const [dsId, tags] of Object.entries(byDS)) {
+      for (const t of tags) {
+        const path = `${dsId}:${t.Path}`;
+        const unsub = tagStoreClient.subscribe(path, (state) => {
+          setLiveValues((prev) => ({ ...prev, [path]: state }));
+        });
+        unsubsRef.current.push(unsub);
+        // Seed from cache.
+        const cached = tagStoreClient.get(path);
+        if (cached) nextValues[path] = cached;
+      }
+    }
+    if (Object.keys(nextValues).length) setLiveValues(nextValues);
+
+    return () => {
+      unsubsRef.current.forEach((u) => u());
+      unsubsRef.current = [];
+    };
+  }, [byDS]);
 
   const bind = (dsId: string, path: string) => {
     if (!selectedWidgetId) return;
@@ -88,24 +131,37 @@ export function TagBrowser() {
                   return t.Path.toLowerCase().includes(q) || (t.Description ?? "").toLowerCase().includes(q);
                 })
                 .slice(0, 200)
-                .map((t) => (
-                <button
-                  key={t.Path}
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData("text/x-tag-binding", `${ds.id}:${t.Path}`);
-                    e.dataTransfer.effectAllowed = "link";
-                  }}
-                  onClick={() => bind(ds.id, t.Path)}
-                  title={`${ds.id}:${t.Path} — drag onto a widget to bind`}
-                  className="block w-full text-left py-0.5 px-1.5 rounded hover:bg-zinc-800 cursor-grab active:cursor-grabbing"
-                >
-                  <div className="text-[11px] truncate">{t.Description || t.Path}</div>
-                  {t.Description && (
-                    <div className="text-[10px] font-mono text-zinc-500 truncate">{t.Path}</div>
-                  )}
-                </button>
-              ))}
+                .map((t) => {
+                  const tagKey = `${ds.id}:${t.Path}`;
+                  const live = liveValues[tagKey];
+                  const valueText = fmtValue(live);
+                  const isGood = live?.quality === "Good";
+                  return (
+                    <button
+                      key={t.Path}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("text/x-tag-binding", tagKey);
+                        e.dataTransfer.effectAllowed = "link";
+                      }}
+                      onClick={() => bind(ds.id, t.Path)}
+                      title={`${tagKey} — drag onto a widget to bind`}
+                      className="flex items-center w-full text-left py-0.5 px-1.5 rounded hover:bg-zinc-800 cursor-grab active:cursor-grabbing gap-1.5"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[11px] truncate">{t.Description || t.Path}</div>
+                        {t.Description && (
+                          <div className="text-[10px] font-mono text-zinc-500 truncate">{t.Path}</div>
+                        )}
+                      </div>
+                      {valueText && (
+                        <span className={`text-[10px] font-mono shrink-0 tabular-nums ${isGood ? "text-emerald-400" : "text-zinc-500"}`}>
+                          {valueText}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
 
               {tags.length === 0 && st?.connected && ds.type === "mbtcp" && (
                 <div className="text-[10px] text-zinc-500 italic">

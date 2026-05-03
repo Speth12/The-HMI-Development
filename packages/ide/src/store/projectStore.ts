@@ -4,7 +4,7 @@ import { create } from "zustand";
 export type WidgetType =
   | "gauge" | "trend" | "led" | "button" | "numericInput"
   | "numericDisplay" | "textInput" | "textDisplay" | "historyLog"
-  | "tank" | "setpoint";
+  | "tank" | "setpoint" | "multiState";
 
 export type Widget = {
   id: string;

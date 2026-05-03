@@ -196,6 +196,11 @@ export function Properties() {
         </>
       )}
 
+      {/* ── Multi-State ──────────────────────────────────────────────── */}
+      {w.type === "multiState" && (
+        <MultiStateEditor w={w} setConfig={setConfig} inp={inp} label={label} />
+      )}
+
       {/* ── Trend ────────────────────────────────────────────────────── */}
       {w.type === "trend" && (
         <>
@@ -220,6 +225,68 @@ export function Properties() {
             className={numInp} />
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Multi-State editor ────────────────────────────────────────────────────
+
+type StateEntry = { value: number | string; label: string; color: string; textColor?: string };
+
+function MultiStateEditor({ w, setConfig, inp, label }: {
+  w: { config?: Record<string, unknown> };
+  setConfig: (k: string, v: unknown) => void;
+  inp: string; label: LabelFn;
+}) {
+  const states: StateEntry[] = (w.config?.states as StateEntry[]) ?? [
+    { value: 0, label: "OFF",      color: "#27272a", textColor: "#a1a1aa" },
+    { value: 1, label: "RUNNING",  color: "#14532d", textColor: "#4ade80" },
+    { value: 2, label: "FAULT",    color: "#450a0a", textColor: "#f87171" },
+  ];
+
+  const update = (idx: number, patch: Partial<StateEntry>) => {
+    const next = states.map((s, i) => (i === idx ? { ...s, ...patch } : s));
+    setConfig("states", next);
+  };
+
+  const add = () => {
+    setConfig("states", [...states, { value: states.length, label: "STATE " + states.length, color: "#1c1c1e", textColor: "#ffffff" }]);
+  };
+
+  const remove = (idx: number) => setConfig("states", states.filter((_, i) => i !== idx));
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        {label("States")}
+        <button onClick={add} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700">+ add</button>
+      </div>
+      <div className="space-y-1.5">
+        {states.map((s, i) => (
+          <div key={i} className="border border-zinc-700/50 rounded p-1.5 space-y-1">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-zinc-500 shrink-0">val</span>
+              <input value={String(s.value)} placeholder="0"
+                onChange={(e) => update(i, { value: isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value) })}
+                className={`${inp} w-12 font-mono text-[10px]`} />
+              <input value={s.label} placeholder="label"
+                onChange={(e) => update(i, { label: e.target.value })}
+                className={`${inp} flex-1`} />
+              <button onClick={() => remove(i)} className="text-zinc-600 hover:text-red-400 text-xs shrink-0">×</button>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-zinc-500 w-6">bg</span>
+              <input type="color" value={s.color}
+                onChange={(e) => update(i, { color: e.target.value })}
+                className="h-5 w-7 rounded border border-zinc-700 bg-zinc-900 cursor-pointer shrink-0" />
+              <span className="text-[10px] text-zinc-500 w-6">txt</span>
+              <input type="color" value={s.textColor ?? "#ffffff"}
+                onChange={(e) => update(i, { textColor: e.target.value })}
+                className="h-5 w-7 rounded border border-zinc-700 bg-zinc-900 cursor-pointer shrink-0" />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

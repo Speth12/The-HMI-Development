@@ -494,6 +494,38 @@ function HistoryLogWidget({ w }: { w: Widget }) {
   );
 }
 
+// ── MultiState widget ──────────────────────────────────────────────────────
+
+type StateEntry = { value: number | string; label: string; color: string; textColor?: string };
+
+const DEFAULT_STATES: StateEntry[] = [
+  { value: 0, label: "OFF",     color: "#27272a", textColor: "#a1a1aa" },
+  { value: 1, label: "RUNNING", color: "#14532d", textColor: "#4ade80" },
+  { value: 2, label: "FAULT",   color: "#450a0a", textColor: "#f87171" },
+];
+
+function MultiStateWidget({ w }: { w: Widget }) {
+  const t = useTag(w.binding);
+  const states: StateEntry[] = (w.config?.states as StateEntry[]) ?? DEFAULT_STATES;
+  const raw = t.value;
+  // Match by loose equality (handles numeric string vs number).
+  const match = states.find((s) => String(s.value) === String(raw));
+  const bg      = match?.color    ?? "#1c1c1e";
+  const textClr = match?.textColor ?? "#71717a";
+  const text    = match?.label    ?? (raw == null ? "—" : String(raw));
+
+  return (
+    <div
+      className="h-full flex items-center justify-center rounded transition-colors duration-300"
+      style={{ backgroundColor: bg }}
+    >
+      <span className="text-lg font-bold tracking-widest uppercase" style={{ color: textClr }}>
+        {text}
+      </span>
+    </div>
+  );
+}
+
 // ── registry ───────────────────────────────────────────────────────────────
 
 const renderers: Record<string, React.ComponentType<{ w: Widget }>> = {
@@ -508,6 +540,7 @@ const renderers: Record<string, React.ComponentType<{ w: Widget }>> = {
   numericInput:   NumericInputWidget,
   textInput:      TextInputWidget,
   historyLog:     HistoryLogWidget,
+  multiState:     MultiStateWidget,
 };
 
 export function WidgetRenderer({ w }: { w: Widget }) {
