@@ -328,6 +328,66 @@ func callFunc(name string, args []float64) (float64, error) {
 			return 0, fmt.Errorf("pow(base, exp) requires 2 args")
 		}
 		return math.Pow(args[0], args[1]), nil
+	case "log":
+		if len(args) != 1 {
+			return 0, fmt.Errorf("log(x) requires 1 arg")
+		}
+		return math.Log(args[0]), nil
+	case "log10":
+		if len(args) != 1 {
+			return 0, fmt.Errorf("log10(x) requires 1 arg")
+		}
+		return math.Log10(args[0]), nil
+	case "log2":
+		if len(args) != 1 {
+			return 0, fmt.Errorf("log2(x) requires 1 arg")
+		}
+		return math.Log2(args[0]), nil
+	case "sin":
+		if len(args) != 1 {
+			return 0, fmt.Errorf("sin(x) requires 1 arg")
+		}
+		return math.Sin(args[0]), nil
+	case "cos":
+		if len(args) != 1 {
+			return 0, fmt.Errorf("cos(x) requires 1 arg")
+		}
+		return math.Cos(args[0]), nil
+	case "tan":
+		if len(args) != 1 {
+			return 0, fmt.Errorf("tan(x) requires 1 arg")
+		}
+		return math.Tan(args[0]), nil
+	case "if":
+		// if(condition, trueVal, falseVal) — condition != 0 is true
+		if len(args) != 3 {
+			return 0, fmt.Errorf("if(cond, trueVal, falseVal) requires 3 args")
+		}
+		if args[0] != 0 {
+			return args[1], nil
+		}
+		return args[2], nil
+	case "sign":
+		if len(args) != 1 {
+			return 0, fmt.Errorf("sign(x) requires 1 arg")
+		}
+		if args[0] > 0 {
+			return 1, nil
+		} else if args[0] < 0 {
+			return -1, nil
+		}
+		return 0, nil
+	case "map":
+		// map(x, inLo, inHi, outLo, outHi) — linear map
+		if len(args) != 5 {
+			return 0, fmt.Errorf("map(x, inLo, inHi, outLo, outHi) requires 5 args")
+		}
+		inSpan := args[2] - args[1]
+		if inSpan == 0 {
+			return args[3], nil
+		}
+		t := (args[0] - args[1]) / inSpan
+		return args[3] + t*(args[4]-args[3]), nil
 	default:
 		return 0, fmt.Errorf("unknown function %q", name)
 	}

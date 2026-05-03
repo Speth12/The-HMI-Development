@@ -40,6 +40,19 @@ func TestEval(t *testing.T) {
 		{"pow(2, 10)", 1024, false},
 		// Missing tag → 0
 		{"{opcua:Missing} + 5", 5, false},
+		// Trig / log / sign / map / if
+		{"sin(0)", 0, false},
+		{"cos(0)", 1, false},
+		{"log(1)", 0, false},
+		{"log10(100)", 2, false},
+		{"log2(8)", 3, false},
+		{"sign(-7)", -1, false},
+		{"sign(0)", 0, false},
+		{"sign(3.14)", 1, false},
+		{"if(1, 42, 0)", 42, false},
+		{"if(0, 42, 99)", 99, false},
+		{"map(50, 0, 100, 0, 10)", 5, false},
+		{"map(0, 0, 100, -10, 10)", -10, false},
 	}
 
 	for _, c := range cases {

@@ -2,6 +2,7 @@
 // The operator runs ON the PLC so all URLs are relative (same origin).
 import { useEffect, useRef, useState } from "react";
 import { useTag } from "../hooks/useTag";
+import { useWriteConfirm } from "../writeContext";
 
 export type WidgetType =
   | "gauge" | "trend" | "led" | "button" | "numericInput"
@@ -160,12 +161,14 @@ function TankWidget({ w }: { w: Widget }) {
 
 function ButtonWidget({ w }: { w: Widget }) {
   const t = useTag(w.binding);
+  const confirm   = useWriteConfirm();
   const label     = (w.config?.label    as string)  ?? "Press";
   const momentary = (w.config?.momentary as boolean) ?? true;
   const onValue   = w.config?.onValue  ?? 1;
   const offValue  = w.config?.offValue ?? 0;
 
   if (momentary) {
+    // Momentary: write directly on pointer events (no confirm — too fast for a dialog).
     return (
       <button
         className="w-full h-full rounded-md bg-blue-600 hover:bg-blue-500 active:scale-95 text-sm font-medium transition-all"
@@ -177,13 +180,16 @@ function ButtonWidget({ w }: { w: Widget }) {
       </button>
     );
   }
+  // Toggle: show confirmation dialog before writing.
   const on = !!t.value;
+  const nextValue = on ? offValue : onValue;
+  const nextLabel = on ? `OFF (${String(offValue)})` : `ON (${String(onValue)})`;
   return (
     <button
       className={`w-full h-full rounded-md text-sm font-medium transition-all active:scale-95 ${
         on ? "bg-emerald-600 hover:bg-emerald-500" : "bg-zinc-700 hover:bg-zinc-600"
       }`}
-      onClick={() => w.binding && writeTag(w.binding, on ? offValue : onValue)}
+      onClick={() => w.binding && confirm({ binding: w.binding, value: nextValue, label: nextLabel })}
     >
       {label}
     </button>
@@ -192,6 +198,7 @@ function ButtonWidget({ w }: { w: Widget }) {
 
 function NumericInputWidget({ w }: { w: Widget }) {
   const t = useTag(w.binding);
+  const confirm = useWriteConfirm();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -204,7 +211,9 @@ function NumericInputWidget({ w }: { w: Widget }) {
 
   const commit = () => {
     const n = parseFloat(draft);
-    if (!isNaN(n) && w.binding) writeTag(w.binding, n);
+    if (!isNaN(n) && w.binding) {
+      confirm({ binding: w.binding, value: n });
+    }
     setEditing(false);
   };
 
@@ -234,7 +243,7 @@ function NumericInputWidget({ w }: { w: Widget }) {
         </div>
       )}
       <div className={`text-[10px] mt-1 ${qualityColor[t.quality] ?? "text-zinc-500"}`}>
-        {editing ? "enter value → confirm" : t.quality}
+        {editing ? "Enter → confirm write" : t.quality}
       </div>
     </div>
   );
@@ -242,10 +251,14 @@ function NumericInputWidget({ w }: { w: Widget }) {
 
 function TextInputWidget({ w }: { w: Widget }) {
   const t = useTag(w.binding);
+  const confirm = useWriteConfirm();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const startEdit = () => { setDraft(fmt(t.value)); setEditing(true); };
-  const commit = () => { if (w.binding) writeTag(w.binding, draft); setEditing(false); };
+  const commit = () => {
+    if (w.binding) confirm({ binding: w.binding, value: draft });
+    setEditing(false);
+  };
   return (
     <div className="flex flex-col h-full justify-center">
       {editing ? (
@@ -413,6 +426,7 @@ function HistoryLogWidget({ w }: { w: Widget }) {
 
 function SetpointWidget({ w }: { w: Widget }) {
   const t = useTag(w.binding);
+  const confirm = useWriteConfirm();
   const min = (w.config?.min as number) ?? 0;
   const max = (w.config?.max as number) ?? 100;
   const step = (w.config?.step as number) ?? 1;
@@ -421,7 +435,7 @@ function SetpointWidget({ w }: { w: Widget }) {
 
   const commit = (n: number) => {
     setDraft(null);
-    if (w.binding) writeTag(w.binding, n);
+    if (w.binding) confirm({ binding: w.binding, value: n });
   };
 
   return (
