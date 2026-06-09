@@ -72,27 +72,30 @@ func TestQueryRangeFilter(t *testing.T) {
 
 func TestTrimRetention(t *testing.T) {
 	h := newTestHistorian(t)
-	h.SetMaxSamples(50)
-	now := time.Now().UnixNano()
-	for i := range 200 {
+	// Keep only 1 second of history.
+	h.SetRetention(time.Second)
+
+	now := time.Now()
+	// Insert samples spread from 5 seconds ago to now.
+	for i := range 10 {
+		ts := now.Add(time.Duration(i-5) * time.Second).UnixNano()
 		_ = h.Record(tagstore.TagUpdate{
 			Path:  "noise",
-			State: tagstore.TagState{Value: i, TS: now + int64(i)},
+			State: tagstore.TagState{Value: i, TS: ts},
 		})
 	}
+
 	if err := h.trim(); err != nil {
 		t.Fatalf("trim: %v", err)
 	}
-	samples, err := h.Query(context.Background(), "noise", 0, now+1_000_000_000, 0)
+
+	// Only samples from (now - 1s) onward should survive: i=4 and i=5..9 → 6 samples (≥ -1s threshold).
+	samples, err := h.Query(context.Background(), "noise", 0, now.Add(time.Second).UnixNano(), 0)
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
-	if len(samples) != 50 {
-		t.Errorf("after trim: got %d want 50", len(samples))
-	}
-	// trim keeps the newest, so the last sample value should be 199
-	if samples[len(samples)-1].Value.(float64) != 199 {
-		t.Errorf("trim kept wrong samples: last=%v", samples[len(samples)-1].Value)
+	if len(samples) == 0 || len(samples) > 6 {
+		t.Errorf("after trim: got %d want 1-6 samples within retention window", len(samples))
 	}
 }
 
@@ -104,5 +107,71 @@ func TestQueryUnknownPath(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("expected 0, got %d", len(got))
+	}
+}
+
+func TestQueryAggregated(t *testing.T) {
+	h := newTestHistorian(t)
+	// Base time aligned to a 10s boundary to make bucket math predictable.
+	base := (time.Now().UnixNano() / int64(10*time.Second)) * int64(10*time.Second)
+
+	// Insert 20 samples spread over 20 seconds (1 per second).
+	for i := range 20 {
+		_ = h.Record(tagstore.TagUpdate{
+			Path:  "temp",
+			State: tagstore.TagState{Value: float64(i), TS: base + int64(i)*int64(time.Second)},
+		})
+	}
+
+	aggs, err := h.QueryAggregated(context.Background(), "temp", base, base+int64(20*time.Second), 10*time.Second, 0)
+	if err != nil {
+		t.Fatalf("QueryAggregated: %v", err)
+	}
+	if len(aggs) != 2 {
+		t.Fatalf("expected 2 buckets, got %d", len(aggs))
+	}
+	// Bucket 0: values 0–9; bucket 1: values 10–19.
+	if aggs[0].Min == nil || *aggs[0].Min != 0 {
+		t.Errorf("bucket 0 min: %v", aggs[0].Min)
+	}
+	if aggs[1].Max == nil || *aggs[1].Max != 19 {
+		t.Errorf("bucket 1 max: %v", aggs[1].Max)
+	}
+	if aggs[0].Count != 10 {
+		t.Errorf("bucket 0 count: got %d want 10", aggs[0].Count)
+	}
+}
+
+func TestQueryMulti(t *testing.T) {
+	h := newTestHistorian(t)
+	now := time.Now().UnixNano()
+
+	paths := []string{"a", "b", "c"}
+	for _, p := range paths {
+		for i := range 3 {
+			_ = h.Record(tagstore.TagUpdate{
+				Path:  p,
+				State: tagstore.TagState{Value: i, TS: now + int64(i)*1_000_000},
+			})
+		}
+	}
+
+	result, err := h.QueryMulti(context.Background(), paths, 0, now+1_000_000_000, 0)
+	if err != nil {
+		t.Fatalf("QueryMulti: %v", err)
+	}
+	for _, p := range paths {
+		if len(result[p]) != 3 {
+			t.Errorf("path %s: got %d samples want 3", p, len(result[p]))
+		}
+	}
+
+	// Unknown path should return empty slice, not missing key.
+	result2, err := h.QueryMulti(context.Background(), []string{"missing"}, 0, now+1_000_000_000, 0)
+	if err != nil {
+		t.Fatalf("QueryMulti missing: %v", err)
+	}
+	if result2["missing"] == nil {
+		t.Error("expected empty slice for missing path, got nil")
 	}
 }

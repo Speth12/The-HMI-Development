@@ -4,13 +4,15 @@ import { create } from "zustand";
 export type WidgetType =
   | "gauge" | "trend" | "led" | "button" | "numericInput"
   | "numericDisplay" | "textInput" | "textDisplay" | "historyLog"
-  | "tank" | "setpoint" | "multiState";
+  | "tank" | "setpoint" | "multiState" | "alarmBanner" | "image";
 
 export type Widget = {
   id: string;
   type: WidgetType;
   x: number; y: number; w: number; h: number;
   binding?: string;
+  visibleBinding?: string;
+  locked?: boolean;
   config?: Record<string, unknown>;
 };
 
@@ -52,6 +54,8 @@ export type Recipe = {
 export type Project = {
   version: string;
   name?: string;
+  pin?: string;
+  viewOnly?: boolean;
   datasources: Datasource[];
   pages: Page[];
   alarmRules?: AlarmRule[];

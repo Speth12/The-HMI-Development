@@ -2,11 +2,14 @@ node_modules/
 dist/
 
 # compiled binaries
+x-hmi
 x-hmi.exe
 x-hmi.exe~
 x-hmi-plc
 x-hmi-plc-amd64
 x-hmi-arm64
+x-hmi-armv7
+x-hmi-linux-amd64
 
 # tsc transpiled JS alongside .ts/.tsx sources
 packages/ide/src/**/*.js
@@ -19,6 +22,12 @@ packages/operator/src/**/*.js
 *.db
 *.db-shm
 *.db-wal
+
+# Project files (user data — mount via volume, don't commit)
+project/*.xhmi.json
+
+# Operator UI embed dir (built by Dockerfile / make build-operator)
+cmd/x-hmi/ui/
 
 # logs
 *.log

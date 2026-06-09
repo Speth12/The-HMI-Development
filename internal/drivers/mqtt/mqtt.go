@@ -235,3 +235,7 @@ func waitToken(ctx context.Context, tok mqttlib.Token) bool {
 		return false
 	}
 }
+
+func init() {
+	drivers.Register("mqtt", func(_ drivers.BuildCtx) drivers.ProtocolDriver { return New() })
+}

@@ -417,3 +417,7 @@ func overrideHost(serverURL, dialURL string) string {
 	srv.Host = dial.Host
 	return srv.String()
 }
+
+func init() {
+	drivers.Register("opcua", func(_ drivers.BuildCtx) drivers.ProtocolDriver { return New() })
+}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Speth12/x-hmi/internal/alarmstore"
 	"github.com/Speth12/x-hmi/internal/project"
 	"github.com/go-chi/chi/v5"
 )
@@ -175,22 +176,80 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	path := q.Get("path")
-	if path == "" {
-		writeErr(w, 400, "path is required")
-		return
-	}
 	from := parseInt64(q.Get("from"), 0)
 	to := parseInt64(q.Get("to"), time.Now().UnixNano())
 	limit := int(parseInt64(q.Get("limit"), 1000))
 
-	samples, err := s.rt.Historian.Query(r.Context(), path, from, to, limit)
+	// ?bucket=1m aggregates results into time buckets (e.g. 30s, 5m, 1h).
+	var bucketDur time.Duration
+	if b := q.Get("bucket"); b != "" {
+		var err error
+		bucketDur, err = time.ParseDuration(b)
+		if err != nil || bucketDur <= 0 {
+			writeErr(w, 400, "invalid bucket duration (use Go duration: 30s, 5m, 1h)")
+			return
+		}
+	}
+
+	// ?paths=a,b,c queries multiple tags; ?path=x is the single-tag form.
+	var paths []string
+	if ps := q.Get("paths"); ps != "" {
+		for _, p := range strings.Split(ps, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				paths = append(paths, p)
+			}
+		}
+	} else if p := q.Get("path"); p != "" {
+		paths = []string{p}
+	}
+	if len(paths) == 0 {
+		writeErr(w, 400, "path or paths is required")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Multi-tag aggregated.
+	if len(paths) > 1 && bucketDur > 0 {
+		result, err := s.rt.Historian.QueryMultiAggregated(ctx, paths, from, to, bucketDur, limit)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 200, result)
+		return
+	}
+
+	// Multi-tag raw.
+	if len(paths) > 1 {
+		result, err := s.rt.Historian.QueryMulti(ctx, paths, from, to, limit)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 200, result)
+		return
+	}
+
+	// Single-tag aggregated.
+	path := paths[0]
+	if bucketDur > 0 {
+		aggs, err := s.rt.Historian.QueryAggregated(ctx, path, from, to, bucketDur, limit)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 200, aggs)
+		return
+	}
+
+	// Single-tag raw (original behaviour, with CSV support).
+	samples, err := s.rt.Historian.Query(ctx, path, from, to, limit)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
 
-	// If the client accepts CSV or format=csv is requested, return CSV.
 	accept := r.Header.Get("Accept")
 	if q.Get("format") == "csv" || strings.Contains(accept, "text/csv") {
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
@@ -198,7 +257,6 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 		fmt.Fprintf(w, "timestamp,value,quality\n")
 		for _, smpl := range samples {
-			// TS is stored as nanoseconds since epoch.
 			t := time.Unix(0, smpl.TS)
 			fmt.Fprintf(w, "%s,%v,%s\n", t.UTC().Format(time.RFC3339Nano), smpl.Value, smpl.Quality)
 		}
@@ -223,6 +281,26 @@ func parseInt64(s string, def int64) int64 {
 
 func (s *Server) handleListAlarms(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s.rt.Alarms.Events())
+}
+
+func (s *Server) handleAlarmHistory(w http.ResponseWriter, r *http.Request) {
+	if s.rt.AlarmStore == nil {
+		writeErr(w, 503, "alarm history not configured")
+		return
+	}
+	q := r.URL.Query()
+	opts := alarmstore.QueryOptions{
+		From:     parseInt64(q.Get("from"), 0),
+		To:       parseInt64(q.Get("to"), 0),
+		Severity: q.Get("severity"),
+		Limit:    int(parseInt64(q.Get("limit"), 500)),
+	}
+	events, err := s.rt.AlarmStore.Query(r.Context(), opts)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, events)
 }
 
 func (s *Server) handleAckAlarm(w http.ResponseWriter, r *http.Request) {

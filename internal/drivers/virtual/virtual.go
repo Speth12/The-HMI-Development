@@ -312,3 +312,7 @@ func toFloat(v any) float64 {
 		return 0
 	}
 }
+
+func init() {
+	drivers.Register("virtual", func(ctx drivers.BuildCtx) drivers.ProtocolDriver { return New(ctx.Store) })
+}

@@ -1,168 +1,235 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useProject } from "../store/projectStore";
+import { newWidgetId } from "../store/projectStore";
 import { WidgetRenderer } from "../widgets";
+import { setClipboard } from "../hooks/useKeyboardShortcuts";
 
-const COLS = 12;
-const ROW_H = 64; // px per grid row
-const GAP = 8;    // gap-2 = 8px
+const COLS  = 12;
+const ROW_H = 64;
+const GAP   = 8;
+const COL_W = 80;
 
 // Module-level drag state — avoids stale closures during drag events.
 let widgetDrag: { id: string; ox: number; oy: number } | null = null;
 let resizeDrag: { id: string; originX: number; originY: number; corner: "br" | "bl" | "tr" | "tl" } | null = null;
 
-function cellFromEvent(grid: HTMLElement, e: React.DragEvent) {
+function cellFromEvent(grid: HTMLElement, e: React.DragEvent, zoom: number) {
   const rect = grid.getBoundingClientRect();
-  const col = Math.max(0, Math.min(COLS - 1, Math.floor((e.clientX - rect.left) / (rect.width / COLS))));
-  const row = Math.max(0, Math.floor((e.clientY - rect.top) / (ROW_H + GAP)));
+  const cw = (COL_W + GAP) * zoom;
+  const rh = (ROW_H + GAP) * zoom;
+  const col = Math.max(0, Math.min(COLS - 1, Math.floor((e.clientX - rect.left) / cw)));
+  const row = Math.max(0, Math.floor((e.clientY - rect.top) / rh));
   return { col, row };
 }
 
+// ── Context menu ────────────────────────────────────────────────────────────
+
+type CtxMenu = { x: number; y: number; widgetId: string };
+
+function ContextMenu({ menu, onClose, onAction }: {
+  menu: CtxMenu;
+  onClose: () => void;
+  onAction: (action: string, widgetId: string) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const close = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [onClose]);
+
+  const item = (label: string, action: string, danger = false) => (
+    <button
+      key={action}
+      onMouseDown={(e) => { e.preventDefault(); onAction(action, menu.widgetId); onClose(); }}
+      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-700 ${danger ? "text-red-400" : "text-zinc-200"}`}
+    >
+      {label}
+    </button>
+  );
+
+  const { project, activePageId } = useProject.getState();
+  const page = project.pages.find(p => p.id === activePageId);
+  const w = page?.widgets.find(x => x.id === menu.widgetId);
+  const isLocked = w?.locked ?? false;
+
+  return (
+    <div
+      ref={ref}
+      className="fixed z-50 bg-zinc-800 border border-zinc-600 rounded-lg shadow-xl py-1 min-w-[140px]"
+      style={{ left: menu.x, top: menu.y }}
+    >
+      {item(isLocked ? "🔓 Unlock" : "🔒 Lock", "lock")}
+      <div className="border-t border-zinc-700 my-1" />
+      {item("Copy  Ctrl+C", "copy")}
+      {item("Duplicate  Ctrl+D", "duplicate")}
+      <div className="border-t border-zinc-700 my-1" />
+      {item("Delete", "delete", true)}
+    </div>
+  );
+}
+
+// ── Canvas ──────────────────────────────────────────────────────────────────
+
 export function Canvas() {
-  const { project, activePageId, selectedWidgetId, selectWidget, removeWidget, updateWidget } = useProject();
-  const gridRef = useRef<HTMLDivElement>(null);
+  const { project, activePageId, selectedWidgetId, selectWidget, removeWidget, updateWidget, addWidget } = useProject();
+  const gridRef   = useRef<HTMLDivElement>(null);
+  const outerRef  = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom]     = useState(1);
+  const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null);
 
   const page = project.pages.find((p) => p.id === activePageId);
+
+  // Ctrl+scroll to zoom
+  useEffect(() => {
+    const el = outerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      setZoom((z) => Math.max(0.25, Math.min(2.5, parseFloat((z * (e.deltaY > 0 ? 0.9 : 1.11)).toFixed(2)))));
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, []);
+
   if (!page) return <div className="p-6 text-zinc-500">No page selected.</div>;
 
-  // Accept widget-move, resize, and tag-binding drags at the canvas level.
+  const eColW = COL_W * zoom;
+  const eRowH = ROW_H * zoom;
+
   const onDragOver = (e: React.DragEvent) => {
     const types = e.dataTransfer.types;
-    if (types.includes("text/x-widget-id") || types.includes("text/x-tag-binding") || types.includes("text/x-resize")) {
+    if (types.includes("text/x-widget-id") || types.includes("text/x-tag-binding") || types.includes("text/x-resize"))
       e.preventDefault();
-    }
   };
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     if (!gridRef.current) return;
-    const { col, row } = cellFromEvent(gridRef.current, e);
+    const { col, row } = cellFromEvent(gridRef.current, e, zoom);
 
-    // Tag binding: find the widget at the drop cell and bind it.
     const tagBinding = e.dataTransfer.getData("text/x-tag-binding");
     if (tagBinding) {
       const target = page.widgets.find(
-        (w) =>
-          col >= (w.x ?? 0) && col < (w.x ?? 0) + w.w &&
-          row >= (w.y ?? 0) && row < (w.y ?? 0) + w.h,
+        (w) => col >= (w.x ?? 0) && col < (w.x ?? 0) + w.w && row >= (w.y ?? 0) && row < (w.y ?? 0) + w.h,
       );
       if (target) updateWidget(activePageId, target.id, { binding: tagBinding });
       return;
     }
 
-    // Resize drop.
     if (resizeDrag) {
       const w = page.widgets.find((x) => x.id === resizeDrag!.id);
       if (w) {
         const { corner, originX, originY } = resizeDrag;
         let nx = w.x, ny = w.y, nw = w.w, nh = w.h;
-        if (corner === "br") {
-          nw = Math.max(1, col - originX + 1);
-          nh = Math.max(1, row - originY + 1);
-        } else if (corner === "bl") {
-          const newX = Math.min(col, originX + w.w - 1);
-          nw = Math.max(1, originX + w.w - newX);
-          nx = newX;
-          nh = Math.max(1, row - originY + 1);
-        } else if (corner === "tr") {
-          nw = Math.max(1, col - originX + 1);
-          const newY = Math.min(row, originY + w.h - 1);
-          nh = Math.max(1, originY + w.h - newY);
-          ny = newY;
-        } else { // tl
-          const newX = Math.min(col, originX + w.w - 1);
-          nw = Math.max(1, originX + w.w - newX);
-          nx = newX;
-          const newY = Math.min(row, originY + w.h - 1);
-          nh = Math.max(1, originY + w.h - newY);
-          ny = newY;
-        }
-        updateWidget(activePageId, resizeDrag.id, {
-          x: Math.max(0, Math.min(COLS - nw, nx)),
-          y: Math.max(0, ny),
-          w: Math.min(COLS, nw),
-          h: Math.max(1, nh),
-        });
+        if (corner === "br") { nw = Math.max(1, col - originX + 1); nh = Math.max(1, row - originY + 1); }
+        else if (corner === "bl") { const nx2 = Math.min(col, originX + w.w - 1); nw = Math.max(1, originX + w.w - nx2); nx = nx2; nh = Math.max(1, row - originY + 1); }
+        else if (corner === "tr") { nw = Math.max(1, col - originX + 1); const ny2 = Math.min(row, originY + w.h - 1); nh = Math.max(1, originY + w.h - ny2); ny = ny2; }
+        else { const nx2 = Math.min(col, originX + w.w - 1); nw = Math.max(1, originX + w.w - nx2); nx = nx2; const ny2 = Math.min(row, originY + w.h - 1); nh = Math.max(1, originY + w.h - ny2); ny = ny2; }
+        updateWidget(activePageId, resizeDrag.id, { x: Math.max(0, Math.min(COLS - nw, nx)), y: Math.max(0, ny), w: Math.min(COLS, nw), h: Math.max(1, nh) });
       }
       resizeDrag = null;
       return;
     }
 
-    // Widget move: update the widget's grid position.
     if (widgetDrag) {
       const w = page.widgets.find((x) => x.id === widgetDrag!.id);
-      if (w) {
-        updateWidget(activePageId, widgetDrag.id, {
-          x: Math.max(0, Math.min(COLS - w.w, col - widgetDrag.ox)),
-          y: Math.max(0, row - widgetDrag.oy),
-        });
-      }
+      if (w) updateWidget(activePageId, widgetDrag.id, { x: Math.max(0, Math.min(COLS - w.w, col - widgetDrag.ox)), y: Math.max(0, row - widgetDrag.oy) });
       widgetDrag = null;
     }
   };
 
+  const handleCtxAction = (action: string, widgetId: string) => {
+    const w = page.widgets.find((x) => x.id === widgetId);
+    if (!w) return;
+    if (action === "lock")      { updateWidget(activePageId, widgetId, { locked: !w.locked }); }
+    if (action === "copy")      { setClipboard(w); }
+    if (action === "duplicate") { const nextY = page.widgets.reduce((m, wg) => Math.max(m, wg.y + wg.h), 0); addWidget(activePageId, { ...w, id: newWidgetId(), y: nextY }); }
+    if (action === "delete")    { removeWidget(activePageId, widgetId); }
+  };
+
   return (
     <div
-      className="flex-1 overflow-auto p-6 bg-zinc-950"
+      ref={outerRef}
+      className="flex-1 overflow-auto p-6 bg-zinc-950 select-none"
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
+      {/* Zoom indicator */}
+      {zoom !== 1 && (
+        <div className="fixed bottom-8 right-8 z-40 bg-zinc-800 border border-zinc-600 rounded-full px-3 py-1 text-[11px] text-zinc-400 font-mono flex items-center gap-2 shadow-lg">
+          {Math.round(zoom * 100)}%
+          <button onClick={() => setZoom(1)} className="text-zinc-500 hover:text-zinc-200">↺</button>
+        </div>
+      )}
+
       <div
         ref={gridRef}
-        className="grid gap-2 max-w-[1400px] mx-auto relative"
+        className="grid relative"
         style={{
-          gridTemplateColumns: `repeat(${COLS}, 1fr)`,
-          gridAutoRows: `${ROW_H}px`,
+          gap: `${GAP}px`,
+          gridTemplateColumns: `repeat(${COLS}, ${eColW}px)`,
+          gridAutoRows: `${eRowH}px`,
           backgroundImage: `radial-gradient(circle, #3f3f4644 1px, transparent 1px)`,
-          backgroundSize: `calc(100% / ${COLS}) ${ROW_H + GAP}px`,
+          backgroundSize: `${eColW + GAP}px ${eRowH + GAP}px`,
           backgroundPosition: `${GAP / 2}px ${GAP / 2}px`,
+          width: `${COLS * (eColW + GAP) - GAP}px`,
         }}
-        onClick={() => selectWidget(null)}
+        onClick={() => { selectWidget(null); setCtxMenu(null); }}
       >
         {page.widgets.map((w) => {
           const selected = selectedWidgetId === w.id;
+          const locked   = w.locked ?? false;
 
           const onDragStart = (e: React.DragEvent) => {
-            // Prevent drag-start from interactive children (inputs, buttons).
+            if (locked) { e.preventDefault(); return; }
             const tag = (e.target as HTMLElement).tagName;
-            if (tag === "INPUT" || tag === "BUTTON" || tag === "TEXTAREA") {
-              e.preventDefault();
-              return;
-            }
+            if (tag === "INPUT" || tag === "BUTTON" || tag === "TEXTAREA") { e.preventDefault(); return; }
             if (!gridRef.current) return;
-            const { col, row } = cellFromEvent(gridRef.current, e);
+            const { col, row } = cellFromEvent(gridRef.current, e, zoom);
             widgetDrag = { id: w.id, ox: col - (w.x ?? 0), oy: row - (w.y ?? 0) };
             e.dataTransfer.setData("text/x-widget-id", w.id);
             e.dataTransfer.effectAllowed = "move";
           };
 
+          const onContextMenu = (e: React.MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            selectWidget(w.id);
+            setCtxMenu({ x: e.clientX, y: e.clientY, widgetId: w.id });
+          };
+
           return (
             <div
               key={w.id}
-              draggable
+              draggable={!locked}
               onDragStart={onDragStart}
-              onClick={(e) => { e.stopPropagation(); selectWidget(w.id); }}
+              onClick={(e) => { e.stopPropagation(); selectWidget(w.id); setCtxMenu(null); }}
+              onContextMenu={onContextMenu}
               className={`relative rounded-lg ${
-                selected
-                  ? "ring-2 ring-blue-500"
-                  : "ring-1 ring-transparent hover:ring-zinc-700"
-              }`}
+                selected ? "ring-2 ring-blue-500" : "ring-1 ring-transparent hover:ring-zinc-700"
+              } ${locked ? "ring-amber-700/60" : ""}`}
               style={{
                 gridColumn: `${(w.x ?? 0) + 1} / span ${w.w}`,
                 gridRow:    `${(w.y ?? 0) + 1} / span ${w.h}`,
-                cursor: "grab",
+                cursor: locked ? "default" : "grab",
               }}
             >
               <WidgetRenderer w={w} />
-              {selected && (
+
+              {/* Lock badge */}
+              {locked && (
+                <div className="absolute top-1 right-1 text-[9px] text-amber-500 pointer-events-none z-10">🔒</div>
+              )}
+
+              {selected && !locked && (
                 <>
                   <button
                     onClick={(e) => { e.stopPropagation(); removeWidget(page.id, w.id); }}
                     className="absolute -top-2 -right-2 text-[10px] px-1.5 py-0.5 rounded bg-red-600 hover:bg-red-500 z-10"
                     style={{ cursor: "default" }}
-                  >
-                    ×
-                  </button>
-                  {/* Resize handles at each corner */}
+                  >×</button>
                   {(["br","bl","tr","tl"] as const).map((corner) => (
                     <div
                       key={corner}
@@ -178,15 +245,16 @@ export function Canvas() {
                       style={{
                         cursor: corner === "br" || corner === "tl" ? "nwse-resize" : "nesw-resize",
                         bottom: corner.startsWith("b") ? -4 : undefined,
-                        top: corner.startsWith("t") ? -4 : undefined,
-                        right: corner.endsWith("r") ? -4 : undefined,
-                        left: corner.endsWith("l") ? -4 : undefined,
+                        top:    corner.startsWith("t") ? -4 : undefined,
+                        right:  corner.endsWith("r")   ? -4 : undefined,
+                        left:   corner.endsWith("l")   ? -4 : undefined,
                       }}
                       onClick={(e) => e.stopPropagation()}
                     />
                   ))}
                 </>
               )}
+
               {w.binding && (
                 <div className="absolute bottom-0 left-0 right-0 text-[9px] font-mono text-zinc-600 px-1.5 truncate pointer-events-none">
                   {w.binding}
@@ -195,12 +263,17 @@ export function Canvas() {
             </div>
           );
         })}
+
         {page.widgets.length === 0 && (
           <div className="col-span-full row-span-2 flex items-center justify-center text-zinc-600 italic text-sm">
             Add widgets from the palette ← · drag tags from the browser → to bind
           </div>
         )}
       </div>
+
+      {ctxMenu && (
+        <ContextMenu menu={ctxMenu} onClose={() => setCtxMenu(null)} onAction={handleCtxAction} />
+      )}
     </div>
   );
 }

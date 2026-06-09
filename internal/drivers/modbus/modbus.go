@@ -486,3 +486,7 @@ func stripScheme(url string) string {
 }
 
 func strPtr(s string) *string { return &s }
+
+func init() {
+	drivers.Register("mbtcp", func(_ drivers.BuildCtx) drivers.ProtocolDriver { return New() })
+}

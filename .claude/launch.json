@@ -18,6 +18,13 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--workspace=packages/ide"],
       "port": 5173
+    },
+    {
+      "name": "xhmi-desktop-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "5174"],
+      "port": 5174,
+      "cwd": "C:\\Users\\speth\\OneDrive\\Desktop\\1 - The HMI Development\\frontend"
     }
   ]
 }

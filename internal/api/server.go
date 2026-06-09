@@ -70,6 +70,7 @@ func (s *Server) routes(assets http.Handler) {
 
 		r.Route("/alarms", func(r chi.Router) {
 			r.Get("/", s.handleListAlarms)
+			r.Get("/history", s.handleAlarmHistory)
 			r.Post("/{id}/ack", s.handleAckAlarm)
 		})
 

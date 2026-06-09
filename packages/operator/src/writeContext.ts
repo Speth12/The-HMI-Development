@@ -31,3 +31,10 @@ export const WriteConfirmContext = createContext<WriteConfirmFn>(
 export function useWriteConfirm(): WriteConfirmFn {
   return useContext(WriteConfirmContext);
 }
+
+/** Navigate context — widgets call this to switch the active page by page ID. */
+export const NavigateContext = createContext<(pageId: string) => void>(() => {});
+
+export function useNavigate(): (pageId: string) => void {
+  return useContext(NavigateContext);
+}

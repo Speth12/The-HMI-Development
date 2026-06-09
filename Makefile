@@ -11,12 +11,11 @@
 #   make clean        Remove build artifacts
 # ─────────────────────────────────────────────────────────────────────────
 
-PLC_HOST     ?= admin@192.168.88.10
-PLC_DEST_DIR ?= /opt/plcnext/apps/xhmi
-PLC_SERVICE  ?= xhmi
+PLC_HOST     ?= admin@10.0.0.210
+PLC_DEST_DIR ?= /opt/plcnext/x-hmi
 
 BINARY       := x-hmi
-BINARY_ARM   := x-hmi-arm64
+BINARY_AMD   := x-hmi-linux-amd64
 CMD_DIR      := ./cmd/x-hmi
 UI_EMBED_DIR := cmd/x-hmi/ui
 
@@ -24,6 +23,7 @@ OPERATOR_PKG := packages/operator
 IDE_PKG      := packages/ide
 
 .PHONY: all dev runtime build build-operator build-ide build-plc deploy-plc \
+        docker-build docker-up docker-down \
         test test-race lint deps tidy clean help
 
 # ── Default ────────────────────────────────────────────────────────────────
@@ -79,31 +79,32 @@ build: build-operator
 	go build -ldflags "-s -w" -o $(BINARY) $(CMD_DIR)
 	@echo "✓ Binary: ./$(BINARY)"
 
-# ARM64 cross-compile for PLCnext AXC F 3152.
+# amd64 cross-compile for PLCnext AXC F 3152 (x86_64 / Linux 2026.0.0).
 build-plc: build-operator
-	@echo "→ Cross-compiling for linux/arm64…"
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
-		go build -ldflags "-s -w" -o $(BINARY_ARM) $(CMD_DIR)
-	@echo "✓ ARM64 binary: ./$(BINARY_ARM)"
-	@ls -lh $(BINARY_ARM)
+	@echo "→ Cross-compiling for linux/amd64…"
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+		go build -ldflags "-s -w" -o $(BINARY_AMD) $(CMD_DIR)
+	@echo "✓ amd64 binary: ./$(BINARY_AMD)"
+	@ls -lh $(BINARY_AMD)
 
 # ── Deploy ─────────────────────────────────────────────────────────────────
 
-# Build ARM64 binary, scp to PLC, restart service.
+# Build amd64 binary and scp to PLC (emergency/debug only — normal use is docker-up).
 deploy-plc: build-plc
 	@echo "→ Uploading to $(PLC_HOST):$(PLC_DEST_DIR)…"
-	ssh $(PLC_HOST) "mkdir -p $(PLC_DEST_DIR)"
-	scp $(BINARY_ARM) $(PLC_HOST):$(PLC_DEST_DIR)/$(BINARY)
-	scp demo.xhmi.json $(PLC_HOST):$(PLC_DEST_DIR)/demo.xhmi.json
-	@echo "→ Restarting service $(PLC_SERVICE) on PLC…"
-	ssh $(PLC_HOST) "pkill -f '$(BINARY)' 2>/dev/null || true && \
-		nohup $(PLC_DEST_DIR)/$(BINARY) \
-			--mode=runtime \
-			--addr=:8080 \
-			--project=$(PLC_DEST_DIR)/demo.xhmi.json \
-			--history=$(PLC_DEST_DIR)/history.db \
-			> $(PLC_DEST_DIR)/xhmi.log 2>&1 &"
-	@echo "✓ Deployed. Operator: http://$(shell echo $(PLC_HOST) | cut -d@ -f2):8080"
+	scp $(BINARY_AMD) $(PLC_HOST):$(PLC_DEST_DIR)/$(BINARY)
+	@echo "✓ Uploaded. SSH to PLC and run: sh $(PLC_DEST_DIR)/start.sh"
+
+# ── Docker (local PC runtime) ─────────────────────────────────────────────────
+
+docker-build:
+	docker build -t x-hmi:latest .
+
+docker-up:
+	docker compose up -d
+
+docker-down:
+	docker compose down
 
 # Install as a systemd service on the PLC (run once after first deploy-plc).
 install-service:
@@ -143,7 +144,7 @@ tidy:
 # ── Cleanup ────────────────────────────────────────────────────────────────
 
 clean:
-	rm -f $(BINARY) $(BINARY_ARM)
+	rm -f $(BINARY) $(BINARY_AMD)
 	rm -rf $(UI_EMBED_DIR)
 	rm -rf $(OPERATOR_PKG)/dist $(IDE_PKG)/dist
 	@echo "✓ Clean"

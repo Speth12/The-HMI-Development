@@ -490,19 +490,13 @@ func (d *Driver) Write(ctx context.Context, path string, value any) error {
 }
 
 func (d *Driver) pxcWrite(ctx context.Context, path string, value any) error {
-	prefix, varName := pxcSplitPath(path)
-	q := url.Values{}
-	q.Set("pathPrefix", prefix)
-	q.Set("paths", varName)
-	reqURL := d.pxcVarURL + "?" + q.Encode()
-
 	body, err := json.Marshal(map[string]any{
 		"variables": []map[string]any{{"path": path, "value": value}},
 	})
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, d.pxcVarURL, strings.NewReader(string(body)))
 	if err != nil {
 		return err
 	}
@@ -516,7 +510,9 @@ func (d *Driver) pxcWrite(ctx context.Context, path string, value any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("rest: pxc write status %d", resp.StatusCode)
+		respBody, _ := io.ReadAll(resp.Body)
+		log.Printf("[DRIVER] rest: pxc write 400 body=%s url=%s payload=%s", respBody, d.pxcVarURL, body)
+		return fmt.Errorf("rest: pxc write status %d: %s", resp.StatusCode, respBody)
 	}
 	return nil
 }
@@ -615,3 +611,7 @@ func splitPath(p string) (urlPath, gjsonPath string) {
 }
 
 func strPtr(s string) *string { return &s }
+
+func init() {
+	drivers.Register("rest", func(_ drivers.BuildCtx) drivers.ProtocolDriver { return New() })
+}

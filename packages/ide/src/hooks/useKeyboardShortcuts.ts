@@ -1,12 +1,16 @@
 // Global keyboard shortcut handler for the IDE.
 // Mounted once in App — uses window event listeners.
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useProject, type Widget } from "../store/projectStore";
 import { newWidgetId } from "../store/projectStore";
 
+// Module-level clipboard — survives page switches and effect re-runs.
+let _clipboard: Widget | null = null;
+export const getClipboard = () => _clipboard;
+export const setClipboard = (w: Widget | null) => { _clipboard = w; };
+
 export function useKeyboardShortcuts() {
   const { activePageId, selectedWidgetId, selectWidget, removeWidget, addWidget, project, exportJSON, undo, redo } = useProject();
-  const clipboard = useRef<Widget | null>(null);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -53,11 +57,11 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // Ctrl/Cmd+C — copy selected widget
+      // Ctrl/Cmd+C — copy selected widget (works across pages)
       if ((e.ctrlKey || e.metaKey) && e.key === "c" && selectedWidgetId) {
         const page = project.pages.find((p) => p.id === activePageId);
         const w = page?.widgets.find((x) => x.id === selectedWidgetId);
-        if (w) { clipboard.current = w; }
+        if (w) { setClipboard(w); }
         return;
       }
 
@@ -73,13 +77,13 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // Ctrl/Cmd+V — paste widget
-      if ((e.ctrlKey || e.metaKey) && e.key === "v" && clipboard.current) {
+      // Ctrl/Cmd+V — paste widget onto active page (cross-page supported)
+      if ((e.ctrlKey || e.metaKey) && e.key === "v" && _clipboard) {
         e.preventDefault();
-        const w = clipboard.current;
+        const w = _clipboard;
         const page = project.pages.find((p) => p.id === activePageId);
         const nextY = page?.widgets.reduce((max, wg) => Math.max(max, wg.y + wg.h), 0) ?? 0;
-        addWidget(activePageId, { ...w, id: newWidgetId(), y: nextY });
+        addWidget(activePageId, { ...w, id: newWidgetId(), y: nextY, locked: undefined });
         return;
       }
 

@@ -8,13 +8,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Speth12/x-hmi/internal/alarmstore"
 	"github.com/Speth12/x-hmi/internal/alarms"
 	"github.com/Speth12/x-hmi/internal/drivers"
-	"github.com/Speth12/x-hmi/internal/drivers/modbus"
-	"github.com/Speth12/x-hmi/internal/drivers/mqtt"
-	"github.com/Speth12/x-hmi/internal/drivers/opcua"
-	"github.com/Speth12/x-hmi/internal/drivers/rest"
-	"github.com/Speth12/x-hmi/internal/drivers/virtual"
+	_ "github.com/Speth12/x-hmi/internal/drivers/modbus"
+	_ "github.com/Speth12/x-hmi/internal/drivers/mqtt"
+	_ "github.com/Speth12/x-hmi/internal/drivers/opcua"
+	_ "github.com/Speth12/x-hmi/internal/drivers/rest"
+	_ "github.com/Speth12/x-hmi/internal/drivers/virtual"
 	"github.com/Speth12/x-hmi/internal/historian"
 	"github.com/Speth12/x-hmi/internal/project"
 	"github.com/Speth12/x-hmi/internal/tagstore"
@@ -22,9 +23,10 @@ import (
 
 // Runtime owns the TagStore, Historian, alarm Engine, and active driver instances.
 type Runtime struct {
-	Store     *tagstore.TagStore
-	Historian *historian.Historian
-	Alarms    *alarms.Engine
+	Store      *tagstore.TagStore
+	Historian  *historian.Historian
+	Alarms     *alarms.Engine
+	AlarmStore *alarmstore.AlarmStore
 
 	mu       sync.RWMutex
 	drivers  map[string]drivers.ProtocolDriver // datasource id → driver
@@ -57,6 +59,10 @@ func (r *Runtime) Start(ctx context.Context) {
 	r.pumpCtx = pumpCtx
 	r.wg.Add(1)
 	go r.pump(pumpCtx)
+	if r.AlarmStore != nil {
+		r.wg.Add(1)
+		go r.persistAlarms(pumpCtx)
+	}
 }
 
 // Stop disconnects all drivers and stops the pump.
@@ -242,20 +248,29 @@ func (r *Runtime) pump(ctx context.Context) {
 // PumpChan returns the channel drivers push into. Exposed for runtime tests.
 func (r *Runtime) PumpChan() chan<- tagstore.TagUpdate { return r.pumpCh }
 
-func (r *Runtime) buildDriver(typ project.DatasourceType) (drivers.ProtocolDriver, error) {
-	switch typ {
-	case project.DatasourceTypeOPCUA:
-		return opcua.New(), nil
-	case project.DatasourceTypeMQTT:
-		return mqtt.New(), nil
-	case project.DatasourceTypeModbus:
-		return modbus.New(), nil
-	case project.DatasourceTypeREST:
-		return rest.New(), nil
-	case project.DatasourceTypeVirtual:
-		return virtual.New(r.Store), nil
+// persistAlarms subscribes to the alarm engine and writes every state
+// transition to the AlarmStore so history survives restarts.
+func (r *Runtime) persistAlarms(ctx context.Context) {
+	defer r.wg.Done()
+	ch := r.Alarms.Subscribe()
+	defer r.Alarms.Unsubscribe(ch)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			if err := r.AlarmStore.Record(ev); err != nil {
+				log.Printf("[RUNTIME] alarm persist: %v", err)
+			}
+		}
 	}
-	return nil, fmt.Errorf("unknown datasource type %q", typ)
+}
+
+func (r *Runtime) buildDriver(typ project.DatasourceType) (drivers.ProtocolDriver, error) {
+	return drivers.Build(string(typ), drivers.BuildCtx{Store: r.Store})
 }
 
 func buildConfig(ds project.DatasourceElement) drivers.DriverConfig {

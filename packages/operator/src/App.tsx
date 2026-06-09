@@ -1,9 +1,17 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { WidgetRenderer, type Widget } from "./widgets";
-import { WriteConfirmContext, type WriteRequest } from "./writeContext";
+import { WriteConfirmContext, NavigateContext, type WriteRequest } from "./writeContext";
+import { AlarmContext, type AlarmEvent } from "./alarmContext";
 
 type Page = { id: string; name: string; widgets: Widget[] };
-type Project = { version: string; name?: string; pages: Page[]; datasources: unknown[] };
+type Project = {
+  version: string;
+  name?: string;
+  pages: Page[];
+  datasources: unknown[];
+  pin?: string;
+  viewOnly?: boolean;
+};
 
 type Recipe = {
   id: string;
@@ -12,17 +20,6 @@ type Recipe = {
   entries: Array<{ binding: string; value: unknown }>;
 };
 
-type AlarmEvent = {
-  id: string;
-  ruleName: string;
-  severity: "critical" | "warning" | "info";
-  message: string;
-  binding: string;
-  value: number;
-  active: boolean;
-  acked: boolean;
-  triggeredAt: string;
-};
 
 const COLS = 12;
 const ROW_H = 72;
@@ -33,44 +30,6 @@ const severityBg: Record<string, string> = {
   info:     "bg-blue-900/80 border-blue-700",
 };
 
-// ── Write confirmation modal ──────────────────────────────────────────────
-function WriteConfirmDialog({ req, onConfirm, onCancel }: {
-  req: WriteRequest;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-      <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-80 space-y-4 shadow-2xl">
-        <div className="text-sm font-semibold text-zinc-100">Confirm Write</div>
-        <div className="space-y-1.5">
-          <div className="text-[11px] text-zinc-500">Tag</div>
-          <div className="font-mono text-xs text-zinc-200 bg-zinc-800 rounded px-2 py-1 break-all">
-            {req.binding}
-          </div>
-          <div className="text-[11px] text-zinc-500 pt-1">Value to write</div>
-          <div className="font-mono text-sm font-bold text-emerald-400 bg-zinc-800 rounded px-2 py-1">
-            {req.label ?? String(req.value)}
-          </div>
-        </div>
-        <div className="flex gap-2 pt-1">
-          <button
-            onClick={onCancel}
-            className="flex-1 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-sm font-medium"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className="flex-1 py-2 rounded bg-blue-600 hover:bg-blue-500 text-sm font-semibold"
-          >
-            Write
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Alarm log panel ────────────────────────────────────────────────────────
 const severityRowBg: Record<string, string> = {
@@ -223,11 +182,37 @@ export function App() {
   const [activePage, setActivePage] = useState(0);
   const [error, setError] = useState("");
   const [alarms, setAlarms] = useState<AlarmEvent[]>([]);
-  const [pendingWrite, setPendingWrite] = useState<WriteRequest | null>(null);
   const [showRecipes, setShowRecipes] = useState(false);
   const [showAlarmLog, setShowAlarmLog] = useState(false);
   const [dsStatus, setDsStatus] = useState<Array<{ id: string; connected: boolean; tagCount: number }>>([]);
   const wsAlarmRef = useRef<WebSocket | null>(null);
+
+  // PIN auth
+  const [authed, setAuthed] = useState(() => sessionStorage.getItem("xhmi-authed") === "1");
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState(false);
+
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const cellPx = 80; // fixed cell size — widgets don't scale with viewport
+
+  // Light mode — persisted in localStorage
+  const [lightMode, setLightMode] = useState(() => localStorage.getItem("xhmi-theme") === "light");
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", lightMode ? "light" : "dark");
+    localStorage.setItem("xhmi-theme", lightMode ? "light" : "dark");
+  }, [lightMode]);
+
+  // Kiosk swipe — touch start X ref
+  const touchStartX = useRef(0);
+  const handleTouchStart = (e: React.TouchEvent) => { touchStartX.current = e.touches[0].clientX; };
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (!project) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    if (Math.abs(dx) < 60) return;
+    setActivePage((p) => dx < 0
+      ? Math.min(p + 1, project.pages.length - 1)
+      : Math.max(p - 1, 0));
+  }, [project]);
 
   // Kiosk mode: ?kiosk or ?kiosk=1 hides nav bar and page switcher.
   const isKiosk = new URLSearchParams(location.search).has("kiosk");
@@ -295,27 +280,38 @@ export function App() {
     catch { /* ignore */ }
   };
 
-  /** Write-confirm handler exposed to all child widgets via context. */
-  const requestWrite = useCallback((req: WriteRequest) => {
-    setPendingWrite(req);
-  }, []);
+  const tryPin = useCallback(() => {
+    if (pinInput === (project?.pin ?? "")) {
+      setAuthed(true);
+      sessionStorage.setItem("xhmi-authed", "1");
+    } else {
+      setPinError(true);
+      setTimeout(() => setPinError(false), 800);
+    }
+    setPinInput("");
+  }, [pinInput, project]);
 
-  const executeWrite = async () => {
-    if (!pendingWrite) return;
-    const { binding, value } = pendingWrite;
-    const sep = binding.indexOf(":");
-    if (sep < 0) { setPendingWrite(null); return; }
-    const datasource = binding.slice(0, sep);
-    const path = binding.slice(sep + 1);
+  const navigateToPage = useCallback((pageId: string) => {
+    if (!project) return;
+    const idx = project.pages.findIndex((p) => p.id === pageId);
+    if (idx >= 0) setActivePage(idx);
+  }, [project]);
+
+  /** Write handler — blocked in viewOnly mode, executes immediately otherwise. */
+  const requestWrite = useCallback(async (req: WriteRequest) => {
+    if (project?.viewOnly) return;
+    const sep = req.binding.indexOf(":");
+    if (sep < 0) return;
+    const datasource = req.binding.slice(0, sep);
+    const path = req.binding.slice(sep + 1);
     try {
       await fetch(`/api/v1/tag/${encodeURIComponent(path)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ datasource, value }),
+        body: JSON.stringify({ datasource, value: req.value }),
       });
     } catch { /* swallow */ }
-    setPendingWrite(null);
-  };
+  }, []);
 
   const activeAlarms = alarms.filter((a) => a.active && !a.acked);
   const hasAlarm = activeAlarms.length > 0;
@@ -328,18 +324,38 @@ export function App() {
   if (error) {
     return (
       <div className="h-screen flex items-center justify-center bg-zinc-950 text-zinc-400">
-        <div className="text-center space-y-2">
-          <div className="text-4xl">⚠</div>
-          <div>{error}</div>
-        </div>
+        <div className="text-center space-y-2"><div className="text-4xl">⚠</div><div>{error}</div></div>
       </div>
     );
   }
 
   if (!project) {
+    return <div className="h-screen flex items-center justify-center bg-zinc-950 text-zinc-500">Loading…</div>;
+  }
+
+  // PIN gate — show lock screen if project has a PIN and user hasn't authenticated
+  if (project.pin && !authed) {
     return (
-      <div className="h-screen flex items-center justify-center bg-zinc-950 text-zinc-500">
-        Loading…
+      <div className="h-screen flex items-center justify-center bg-zinc-950">
+        <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-8 w-80 space-y-4 shadow-2xl text-center">
+          <div className="text-2xl font-bold text-zinc-100">{project.name ?? "X-HMI"}</div>
+          <div className="text-sm text-zinc-500">Enter PIN to continue</div>
+          <input
+            type="password"
+            value={pinInput}
+            onChange={(e) => setPinInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && tryPin()}
+            placeholder="••••"
+            autoFocus
+            className={`w-full text-center text-xl tracking-[0.5em] bg-zinc-800 border rounded-lg px-4 py-3 outline-none transition-colors ${
+              pinError ? "border-red-500 text-red-400 animate-pulse" : "border-zinc-600 focus:border-blue-500 text-zinc-100"
+            }`}
+          />
+          <button onClick={tryPin}
+            className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-colors">
+            Unlock
+          </button>
+        </div>
       </div>
     );
   }
@@ -347,6 +363,8 @@ export function App() {
   const page = project.pages[activePage] ?? project.pages[0];
 
   return (
+    <AlarmContext.Provider value={{ alarms, ack }}>
+    <NavigateContext.Provider value={navigateToPage}>
     <WriteConfirmContext.Provider value={requestWrite}>
       <div className={`${isKiosk ? "h-screen overflow-hidden" : "min-h-screen"} bg-zinc-950 text-zinc-100 flex flex-col`}>
         {/* Header — hidden in kiosk mode */}
@@ -407,6 +425,22 @@ export function App() {
             >
               ⚙ Recipes
             </button>
+            <button
+              onClick={() => setLightMode((v) => !v)}
+              title="Toggle light/dark mode"
+              className="text-xs px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400"
+            >
+              {lightMode ? "🌙" : "☀️"}
+            </button>
+            {project.pin && (
+              <button
+                onClick={() => { setAuthed(false); sessionStorage.removeItem("xhmi-authed"); }}
+                title="Lock screen"
+                className="text-xs px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400"
+              >
+                🔒
+              </button>
+            )}
           </div>
         )}
 
@@ -451,28 +485,28 @@ export function App() {
           </div>
         )}
 
-        {/* Canvas */}
-        <div className="flex-1 overflow-auto p-6">
+        {/* Canvas — responsive, swipe-enabled in kiosk */}
+        <div
+          ref={canvasRef}
+          className="flex-1 overflow-auto p-3"
+          onTouchStart={isKiosk ? handleTouchStart : undefined}
+          onTouchEnd={isKiosk ? handleTouchEnd : undefined}
+        >
           {page.widgets.length === 0 ? (
-            <div className="flex items-center justify-center h-48 text-zinc-600 italic">
-              No widgets on this page.
-            </div>
+            <div className="flex items-center justify-center h-48 text-zinc-600 italic">No widgets on this page.</div>
           ) : (
             <div
-              className="grid gap-2 max-w-[1400px] mx-auto"
+              className="grid gap-1"
               style={{
-                gridTemplateColumns: `repeat(${COLS}, 1fr)`,
-                gridAutoRows: `${ROW_H}px`,
+                gridTemplateColumns: `repeat(${COLS}, ${cellPx}px)`,
+                gridAutoRows: `${cellPx}px`,
               }}
             >
               {page.widgets.map((w) => (
-                <div
-                  key={w.id}
-                  style={{
-                    gridColumn: `${(w.x ?? 0) + 1} / span ${w.w}`,
-                    gridRow: `${(w.y ?? 0) + 1} / span ${w.h}`,
-                  }}
-                >
+                <div key={w.id} style={{
+                  gridColumn: `${(w.x ?? 0) + 1} / span ${w.w}`,
+                  gridRow: `${(w.y ?? 0) + 1} / span ${w.h}`,
+                }}>
                   <WidgetRenderer w={w} />
                 </div>
               ))}
@@ -486,14 +520,6 @@ export function App() {
         )}
       </div>
 
-      {/* Write confirmation dialog */}
-      {pendingWrite && (
-        <WriteConfirmDialog
-          req={pendingWrite}
-          onConfirm={executeWrite}
-          onCancel={() => setPendingWrite(null)}
-        />
-      )}
 
       {/* Recipes slide-out panel */}
       {showRecipes && <RecipesPanel onClose={() => setShowRecipes(false)} />}
@@ -507,22 +533,41 @@ export function App() {
         />
       )}
     </WriteConfirmContext.Provider>
+    </NavigateContext.Provider>
+    </AlarmContext.Provider>
   );
 }
 
 function KioskStatusBar({ alarmCount }: { alarmCount: number }) {
   const [now, setNow] = useState(new Date());
+  const [fs, setFs] = useState(!!document.fullscreenElement);
+
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
 
+  useEffect(() => {
+    const handler = () => setFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+
+  const toggleFs = () => {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+    else document.exitFullscreen();
+  };
+
   return (
     <div className="flex items-center justify-between px-4 py-1.5 bg-zinc-900/60 border-t border-zinc-800 shrink-0 text-[11px] font-mono text-zinc-500">
-      <span>X-HMI</span>
-      {alarmCount > 0 && (
-        <span className="text-red-400 font-semibold">⚠ {alarmCount} active alarm{alarmCount !== 1 ? "s" : ""}</span>
-      )}
+      <button onClick={toggleFs} title={fs ? "Exit fullscreen" : "Enter fullscreen"}
+        className="text-zinc-600 hover:text-zinc-300 transition-colors text-xs">
+        {fs ? "⊡" : "⊞"}
+      </button>
+      {alarmCount > 0
+        ? <span className="text-red-400 font-semibold">⚠ {alarmCount} active alarm{alarmCount !== 1 ? "s" : ""}</span>
+        : <span>X-HMI</span>
+      }
       <span>{now.toLocaleTimeString()}</span>
     </div>
   );

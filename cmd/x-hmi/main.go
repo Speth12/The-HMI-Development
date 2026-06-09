@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"flag"
 	"io/fs"
 	"log"
@@ -16,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Speth12/x-hmi/internal/alarmstore"
 	"github.com/Speth12/x-hmi/internal/api"
 	"github.com/Speth12/x-hmi/internal/historian"
 	"github.com/Speth12/x-hmi/internal/project"
@@ -50,11 +52,39 @@ func spaHandler() http.Handler {
 }
 
 func main() {
+	healthcheck := flag.Bool("healthcheck", false, "probe own /api/v1/alive and exit 0/1")
 	mode := flag.String("mode", "dev", "dev | runtime")
 	addr := flag.String("addr", "", "listen address (default :3001 dev / :8080 runtime)")
 	projectPath := flag.String("project", "", "path to project.json (optional in dev)")
 	historyDB := flag.String("history", "history.db", "SQLite WAL file (use ':memory:' to disable persistence)")
+	historyRetention := flag.Duration("history-retention", 7*24*time.Hour, "how long to keep history (e.g. 48h, 7d)")
+	alarmDB := flag.String("alarm-db", "alarms.db", "SQLite file for alarm event history (use ':memory:' to disable)")
 	flag.Parse()
+
+	if *healthcheck {
+		listenAddr := *addr
+		if listenAddr == "" {
+			listenAddr = ":8080"
+		}
+		host := listenAddr
+		if host[0] == ':' {
+			host = "localhost" + host
+		}
+		c := &http.Client{Timeout: 3 * time.Second}
+		resp, err := c.Get("http://" + host + "/api/v1/alive")
+		if err != nil || resp.StatusCode != http.StatusOK {
+			os.Exit(1)
+		}
+		var body struct {
+			OK bool `json:"ok"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		resp.Body.Close()
+		if !body.OK {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 
 	log.SetFlags(log.Ltime | log.Lmicroseconds | log.Lshortfile)
 
@@ -74,9 +104,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("[X-HMI] historian: %v", err)
 	}
+	hist.SetRetention(*historyRetention)
 	defer hist.Close()
 
+	alarmSt, err := alarmstore.Open(*alarmDB)
+	if err != nil {
+		log.Fatalf("[X-HMI] alarmstore: %v", err)
+	}
+	defer alarmSt.Close()
+
 	rt := runtime.New(store, hist)
+	rt.AlarmStore = alarmSt
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	rt.Start(ctx)

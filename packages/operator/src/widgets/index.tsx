@@ -2,18 +2,20 @@
 // The operator runs ON the PLC so all URLs are relative (same origin).
 import { useEffect, useRef, useState } from "react";
 import { useTag } from "../hooks/useTag";
-import { useWriteConfirm } from "../writeContext";
+import { useWriteConfirm, useNavigate } from "../writeContext";
+import { useAlarms } from "../alarmContext";
 
 export type WidgetType =
   | "gauge" | "trend" | "led" | "button" | "numericInput"
   | "numericDisplay" | "textInput" | "textDisplay" | "historyLog"
-  | "tank" | "setpoint" | "multiState";
+  | "tank" | "setpoint" | "multiState" | "alarmBanner" | "image";
 
 export type Widget = {
   id: string;
   type: WidgetType;
   x: number; y: number; w: number; h: number;
   binding?: string;
+  visibleBinding?: string;
   config?: Record<string, unknown>;
 };
 
@@ -47,12 +49,43 @@ async function writeTag(binding: string, value: unknown): Promise<void> {
   } catch { /* ignore */ }
 }
 
+// ── Color threshold helper ─────────────────────────────────────────────────
+
+type ColorThreshold = { value: number; color: string };
+
+function resolveColor(
+  value: unknown,
+  thresholds: ColorThreshold[],
+): string | null {
+  if (!thresholds.length) return null;
+  if (typeof value !== "number") return null;
+  const sorted = [...thresholds].sort((a, b) => b.value - a.value);
+  for (const t of sorted) {
+    if (value >= t.value) return t.color;
+  }
+  return null;
+}
+
 // ── Frame ──────────────────────────────────────────────────────────────────
 
 function Frame({ w, children }: { w: Widget; children: React.ReactNode }) {
+  const colorThresholds = (w.config?.colorThresholds as ColorThreshold[]) ?? [];
+  const colorBinding = (w.config?.colorBinding as string) || w.binding;
+  const colorTag = useTag(colorThresholds.length ? colorBinding : undefined);
+  const dynColor = resolveColor(colorTag.value, colorThresholds);
+
   return (
-    <div className="h-full w-full rounded-lg bg-zinc-900/80 border border-zinc-800 p-3 flex flex-col gap-1 select-none">
-      <div className="text-[10px] uppercase tracking-wider text-zinc-500 truncate">
+    <div
+      className="h-full w-full rounded-lg bg-zinc-900/80 p-3 flex flex-col gap-1 select-none transition-colors"
+      style={{
+        border: dynColor ? `2px solid ${dynColor}` : "1px solid #27272a",
+        boxShadow: dynColor ? `0 0 8px ${dynColor}44` : undefined,
+      }}
+    >
+      <div
+        className="text-[10px] uppercase tracking-wider truncate"
+        style={{ color: dynColor ? dynColor : undefined }}
+      >
         {(w.config?.label as string) ?? w.type}
       </div>
       <div className="flex-1 min-h-0">{children}</div>
@@ -201,15 +234,28 @@ function TankWidget({ w }: { w: Widget }) {
 // ── Write widgets ──────────────────────────────────────────────────────────
 
 function ButtonWidget({ w }: { w: Widget }) {
-  const t = useTag(w.binding);
-  const confirm   = useWriteConfirm();
+  const t        = useTag(w.binding);
+  const confirm  = useWriteConfirm();
+  const navigate = useNavigate();
   const label     = (w.config?.label    as string)  ?? "Press";
+  const action    = (w.config?.action   as string)  ?? "write";
   const momentary = (w.config?.momentary as boolean) ?? true;
   const onValue   = w.config?.onValue  ?? 1;
   const offValue  = w.config?.offValue ?? 0;
 
+  if (action === "navigate") {
+    const target = w.config?.navigateTo as string | undefined;
+    return (
+      <button
+        className="w-full h-full rounded-md bg-zinc-700 hover:bg-zinc-600 active:scale-95 text-sm font-medium transition-all"
+        onClick={() => target && navigate(target)}
+      >
+        {label}
+      </button>
+    );
+  }
+
   if (momentary) {
-    // Momentary: write directly on pointer events (no confirm — too fast for a dialog).
     return (
       <button
         className="w-full h-full rounded-md bg-blue-600 hover:bg-blue-500 active:scale-95 text-sm font-medium transition-all"
@@ -221,7 +267,6 @@ function ButtonWidget({ w }: { w: Widget }) {
       </button>
     );
   }
-  // Toggle: show confirmation dialog before writing.
   const on = !!t.value;
   const nextValue = on ? offValue : onValue;
   const nextLabel = on ? `OFF (${String(offValue)})` : `ON (${String(onValue)})`;
@@ -320,8 +365,9 @@ function TextInputWidget({ w }: { w: Widget }) {
 
 // ── Trend ──────────────────────────────────────────────────────────────────
 
-type Sample = { ts: number; v: number };
-type TrendSeries = { binding: string; color: string; label?: string };
+type Sample      = { ts: number; v: number };
+type TrendSeries = { binding: string; color: string; label?: string; fill?: boolean; yMin?: number; yMax?: number };
+type RefLine     = { value: number; color: string; label?: string };
 const SERIES_COLORS = ["#3b82f6","#22c55e","#f59e0b","#ef4444","#a855f7","#06b6d4"];
 
 function useSeries(binding: string | undefined, duration: number): Sample[] {
@@ -360,6 +406,15 @@ const TREND_WINDOWS = [
 function TrendWidget({ w }: { w: Widget }) {
   const cfgDuration = (w.config?.duration as number) ?? 300;
   const [windowSec, setWindowSec] = useState(cfgDuration);
+  const [paused, setPaused]       = useState(false);
+  const [pausedAt, setPausedAt]   = useState(0);
+  const [panOffsetMs, setPanOffsetMs] = useState(0);
+  const [hoverFrac, setHoverFrac] = useState<number | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
+  const svgRef      = useRef<SVGSVGElement>(null);
+  const panStartX   = useRef<number | null>(null);
+  const panStartOff = useRef(0);
+
   const duration = windowSec * 1000;
 
   const cfgTags = w.config?.tags as TrendSeries[] | undefined;
@@ -375,64 +430,268 @@ function TrendWidget({ w }: { w: Widget }) {
   const allPts = [s0,s1,s2,s3,s4,s5].slice(0, series.length);
   const flat = allPts.flat();
 
-  const cfgMin = w.config?.min as number | undefined;
-  const cfgMax = w.config?.max as number | undefined;
-  const vMin = cfgMin ?? (flat.length ? Math.min(...flat.map((p) => p.v)) : 0);
-  const vMax = cfgMax ?? (flat.length ? Math.max(...flat.map((p) => p.v)) : 100);
-  const vRange = vMax - vMin || 1;
-  const tMax = flat.length ? Math.max(...flat.map((p) => p.ts)) : Date.now();
+  const liveMax = flat.length ? Math.max(...flat.map((p) => p.ts)) : Date.now();
+  const tMax = (paused ? pausedAt : liveMax) - panOffsetMs;
   const tMin = tMax - duration;
-  const tSpan = tMax - tMin || 1;
 
-  const toLine = (pts: Sample[]) => pts.length < 2 ? "" : pts.filter((p) => p.ts >= tMin)
-    .map((p) => `${(((p.ts-tMin)/tSpan)*100).toFixed(2)},${(100-((p.v-vMin)/vRange)*100).toFixed(2)}`).join(" ");
+  const refLines = (w.config?.refLines as RefLine[]) ?? [];
+  const xFormat = (w.config?.xFormat as string) ?? "time";
 
-  const midVal = (vMin + vMax) / 2;
+  // Per-series Y scales — each series can have its own yMin/yMax
+  const yScales = allPts.map((pts, i) => {
+    const s = series[i]!;
+    const cfgMin = w.config?.min as number | undefined;
+    const cfgMax = w.config?.max as number | undefined;
+    const lo = s.yMin ?? cfgMin ?? (pts.length ? Math.min(...pts.map((p) => p.v)) : 0);
+    const hi = s.yMax ?? cfgMax ?? (pts.length ? Math.max(...pts.map((p) => p.v)) : 100);
+    return { lo, hi, range: (hi - lo) || 1 };
+  });
+
+  // SVG coordinate helpers — per-series Y
+  const toX   = (ts: number) => ((ts - tMin) / duration * 100);
+  const toYi  = (v: number, i: number) => { const { lo, range } = yScales[i] ?? { lo: 0, range: 1 }; return 100 - (v - lo) / range * 100; };
+
+  const toPolyline = (pts: Sample[], i: number) => pts.length < 2 ? "" :
+    pts.filter((p) => p.ts >= tMin - duration * 0.05 && p.ts <= tMax + duration * 0.05)
+      .map((p) => `${toX(p.ts).toFixed(2)},${toYi(p.v, i).toFixed(2)}`).join(" ");
+
+  const toFillPoly = (pts: Sample[], i: number) => {
+    const vis = pts.filter((p) => p.ts >= tMin - duration * 0.05 && p.ts <= tMax + duration * 0.05);
+    if (vis.length < 2) return "";
+    const line = vis.map((p) => `${toX(p.ts).toFixed(2)},${toYi(p.v, i).toFixed(2)}`).join(" ");
+    return `${toX(vis[0]!.ts).toFixed(2)},100 ${line} ${toX(vis[vis.length-1]!.ts).toFixed(2)},100`;
+  };
+
+  // Crosshair
+  const hoverTime = hoverFrac != null ? tMin + hoverFrac * duration : null;
+  const nearestPt = (pts: Sample[]) => {
+    if (hoverTime == null || !pts.length) return null;
+    return pts.reduce((b, p) => Math.abs(p.ts - hoverTime!) < Math.abs(b.ts - hoverTime!) ? p : b);
+  };
+
+  // X-axis tick formatter
+  const fmtTick = (ms: number): string => {
+    const d = new Date(ms);
+    if (xFormat === "relative") {
+      const diffSec = Math.round((ms - Date.now()) / 1000);
+      if (diffSec === 0) return "now";
+      const abs = Math.abs(diffSec);
+      const sign = diffSec < 0 ? "−" : "+";
+      if (abs < 60)   return `${sign}${abs}s`;
+      if (abs < 3600) return `${sign}${Math.round(abs / 60)}m`;
+      return `${sign}${Math.round(abs / 3600)}h`;
+    }
+    if (xFormat === "time-short") return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (xFormat === "datetime")   return d.toLocaleDateString([], { month: "numeric", day: "numeric" }) + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  };
+  const fmtTime = (ms: number) =>
+    new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+  const X_TICKS = 5;
+  const xTicks = Array.from({ length: X_TICKS }, (_, k) => {
+    const frac = k / (X_TICKS - 1);
+    return { frac, ms: tMin + frac * duration };
+  });
+
+  // Scroll-wheel zoom — must be non-passive
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      setWindowSec((s) => Math.max(10, Math.min(7200, Math.round(s * (e.deltaY > 0 ? 1.3 : 0.77)))));
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, []);
+
+  // Mouse handlers
+  const getSvgFrac = (clientX: number) => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return null;
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  };
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    panStartX.current   = e.clientX;
+    panStartOff.current = panOffsetMs;
+    setIsPanning(true);
+  };
+
+  const onMouseMove = (e: React.MouseEvent) => {
+    const frac = getSvgFrac(e.clientX);
+    if (frac == null) return;
+    setHoverFrac(frac);
+    if (panStartX.current != null) {
+      const dx = (e.clientX - panStartX.current) / (svgRef.current?.getBoundingClientRect().width ?? 1);
+      setPanOffsetMs(Math.max(0, panStartOff.current + dx * duration));
+    }
+  };
+
+  const onMouseUp = () => { panStartX.current = null; setIsPanning(false); };
+
+  const onMouseLeave = () => { setHoverFrac(null); onMouseUp(); };
+
+  const togglePause = () => {
+    if (paused) { setPaused(false); setPanOffsetMs(0); }
+    else        { setPausedAt(liveMax); setPaused(true); }
+  };
 
   return (
     <div className="flex flex-col h-full">
-      {/* Time-window picker */}
-      <div className="flex gap-1 shrink-0 mb-0.5">
+      {/* Toolbar */}
+      <div className="flex gap-1 items-center shrink-0 mb-0.5 flex-wrap">
         {TREND_WINDOWS.map((tw) => (
-          <button key={tw.sec} onClick={() => setWindowSec(tw.sec)}
-            className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${windowSec === tw.sec ? "bg-blue-600 text-white" : "bg-zinc-800 text-zinc-500 hover:bg-zinc-700"}`}>
+          <button key={tw.sec}
+            onClick={() => { setWindowSec(tw.sec); setPanOffsetMs(0); }}
+            className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${windowSec === tw.sec && panOffsetMs === 0 && !paused ? "bg-blue-600 text-white" : "bg-zinc-800 text-zinc-500 hover:bg-zinc-700"}`}>
             {tw.label}
           </button>
         ))}
+        <button onClick={togglePause}
+          className={`text-[9px] px-1.5 py-0.5 rounded ml-0.5 ${paused ? "bg-amber-700/80 text-amber-200" : "bg-zinc-800 text-zinc-500 hover:bg-zinc-700"}`}>
+          {paused ? "▶ Live" : "⏸"}
+        </button>
+        {panOffsetMs > 1000 && !paused && (
+          <button onClick={() => setPanOffsetMs(0)} className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 hover:bg-zinc-700">
+            ↩ now
+          </button>
+        )}
       </div>
-      {/* Chart area with Y-axis */}
-      <div className="flex flex-1 min-h-0 gap-1">
-        {/* Y-axis labels */}
-        <div className="flex flex-col justify-between text-[8px] font-mono text-zinc-600 shrink-0 w-7 text-right py-0.5">
-          <span>{vMax.toFixed(0)}</span>
-          <span>{midVal.toFixed(0)}</span>
-          <span>{vMin.toFixed(0)}</span>
+
+      {/* Chart + Y-axis */}
+      <div className="flex flex-1 min-h-0 gap-1 min-w-0">
+        {/* Per-series Y-axis columns */}
+        {yScales.map((sc, i) => {
+          const color = series[i]?.color ?? SERIES_COLORS[i % SERIES_COLORS.length]!;
+          return (
+            <div key={i} className="flex flex-col justify-between text-[7px] font-mono shrink-0 w-7 text-right py-0.5 leading-none" style={{ color }}>
+              <span>{sc.hi.toFixed(sc.hi % 1 === 0 ? 0 : 1)}</span>
+              <span>{((sc.lo + sc.hi) / 2).toFixed((sc.lo + sc.hi) / 2 % 1 === 0 ? 0 : 1)}</span>
+              <span>{sc.lo.toFixed(sc.lo % 1 === 0 ? 0 : 1)}</span>
+            </div>
+          );
+        })}
+
+        {/* SVG wrapper */}
+        <div className="flex-1 relative min-w-0 flex flex-col">
+          <svg
+            ref={svgRef}
+            className="w-full flex-1 overflow-visible"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            style={{ cursor: isPanning ? "grabbing" : "crosshair", display: "block" }}
+            onMouseDown={onMouseDown}
+            onMouseMove={onMouseMove}
+            onMouseUp={onMouseUp}
+            onMouseLeave={onMouseLeave}
+          >
+            {/* Grid */}
+            {[0,25,50,75,100].map((y) => (
+              <line key={y} x1="0" y1={y} x2="100" y2={y} stroke="#27272a" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
+            ))}
+
+            {/* Fills */}
+            {allPts.map((pts, i) => {
+              if (!series[i]?.fill) return null;
+              const color = series[i]!.color ?? SERIES_COLORS[i % SERIES_COLORS.length]!;
+              const poly  = toFillPoly(pts, i);
+              return poly ? <polygon key={`f${i}`} points={poly} fill={color} fillOpacity="0.15" /> : null;
+            })}
+
+            {/* Lines + live dot */}
+            {allPts.map((pts, i) => {
+              const color = series[i]?.color ?? SERIES_COLORS[i % SERIES_COLORS.length]!;
+              const vis   = pts.filter((p) => p.ts >= tMin && p.ts <= tMax);
+              const last  = vis.at(-1);
+              return (
+                <g key={i}>
+                  <polyline points={toPolyline(pts, i)} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+                  {last && <circle cx={toX(last.ts)} cy={toYi(last.v, i)} r="2" fill={color} vectorEffect="non-scaling-stroke" />}
+                </g>
+              );
+            })}
+
+            {/* Reference lines — drawn against series 0 scale */}
+            {refLines.map((rl, i) => {
+              const y = toYi(rl.value, 0);
+              if (y < -5 || y > 105) return null;
+              return (
+                <g key={`r${i}`}>
+                  <line x1="0" y1={y} x2="100" y2={y} stroke={rl.color} strokeWidth="1" strokeDasharray="3,2" vectorEffect="non-scaling-stroke" />
+                  {rl.label && <text x="1" y={Math.max(4, y - 1)} fontSize="4" fill={rl.color} style={{ userSelect: "none" }}>{rl.label}</text>}
+                </g>
+              );
+            })}
+
+            {/* Crosshair */}
+            {hoverFrac != null && (
+              <>
+                <line x1={hoverFrac * 100} y1="0" x2={hoverFrac * 100} y2="100"
+                  stroke="#ffffff38" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
+                {allPts.map((pts, i) => {
+                  const near = nearestPt(pts);
+                  if (!near) return null;
+                  const color = series[i]?.color ?? SERIES_COLORS[i % SERIES_COLORS.length]!;
+                  return <circle key={`c${i}`} cx={toX(near.ts)} cy={toYi(near.v, i)} r="2.5" fill="none" stroke={color} strokeWidth="1" vectorEffect="non-scaling-stroke" />;
+                })}
+              </>
+            )}
+          </svg>
+
+          {/* X-axis tick labels */}
+          <div className="relative shrink-0 h-3">
+            {xTicks.map(({ frac, ms }) => (
+              <span
+                key={frac}
+                className="absolute text-[7px] font-mono text-zinc-500 whitespace-nowrap"
+                style={{
+                  left: `${frac * 100}%`,
+                  transform: frac === 0 ? "none" : frac === 1 ? "translateX(-100%)" : "translateX(-50%)",
+                }}
+              >
+                {fmtTick(ms)}
+              </span>
+            ))}
+          </div>
+
+          {/* Tooltip */}
+          {hoverFrac != null && hoverTime != null && (
+            <div
+              className="absolute top-0 pointer-events-none z-10 bg-zinc-950/95 border border-zinc-700 rounded px-2 py-1.5 text-[9px] font-mono space-y-0.5 shadow-xl"
+              style={{
+                left: hoverFrac > 0.65 ? undefined : `calc(${hoverFrac * 100}% + 6px)`,
+                right: hoverFrac > 0.65 ? `calc(${(1 - hoverFrac) * 100}% + 6px)` : undefined,
+                maxWidth: "160px",
+              }}
+            >
+              <div className="text-zinc-500 mb-0.5">{fmtTime(hoverTime)}</div>
+              {allPts.map((pts, i) => {
+                const near  = nearestPt(pts);
+                const color = series[i]?.color ?? SERIES_COLORS[i % SERIES_COLORS.length]!;
+                const lbl   = series[i]?.label || `s${i}`;
+                return (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <span className="w-2 h-px inline-block" style={{ backgroundColor: color }} />
+                    <span style={{ color }} className="font-semibold">{lbl}:</span>
+                    <span className="text-zinc-300">{near ? fmt(near.v) : "—"}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
-        {/* Plot */}
-        <svg className="flex-1 overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
-          {[0, 25, 50, 75, 100].map((y) => (
-            <line key={y} x1="0" y1={y} x2="100" y2={y} stroke="#27272a" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
-          ))}
-          {allPts.map((pts, i) => {
-            const color = series[i]?.color ?? SERIES_COLORS[i % SERIES_COLORS.length]!;
-            const last = pts.at(-1);
-            return (
-              <g key={i}>
-                <polyline points={toLine(pts)} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
-                {last && <circle cx={(((last.ts-tMin)/tSpan)*100)} cy={(100-((last.v-vMin)/vRange)*100)} r="2" fill={color} vectorEffect="non-scaling-stroke" />}
-              </g>
-            );
-          })}
-        </svg>
       </div>
-      {/* Legend with live values */}
+
+      {/* Legend */}
       <div className="flex items-center gap-2 text-[9px] font-mono mt-0.5 shrink-0 flex-wrap">
         {allPts.map((pts, i) => {
           const color = series[i]?.color ?? SERIES_COLORS[i % SERIES_COLORS.length]!;
-          const last = pts.at(-1);
+          const last  = pts.at(-1);
           return (
             <span key={i} className="flex items-center gap-1">
-              <span className="w-2 h-0.5 inline-block rounded" style={{ backgroundColor: color }} />
+              <span className="w-2 h-px inline-block rounded" style={{ backgroundColor: color }} />
               <span style={{ color }} className="font-semibold">{series[i]?.label ?? `s${i}`}</span>
               <span className="text-zinc-500">{last ? fmt(last.v) : "—"}</span>
             </span>
@@ -549,6 +808,67 @@ function MultiStateWidget({ w }: { w: Widget }) {
 
 // ── Registry ───────────────────────────────────────────────────────────────
 
+// ── Alarm Banner ───────────────────────────────────────────────────────────
+
+const sevColor: Record<string, string> = {
+  critical: "#ef4444", warning: "#f59e0b", info: "#3b82f6",
+};
+const sevBg: Record<string, string> = {
+  critical: "bg-red-950/60 border-red-800", warning: "bg-amber-950/60 border-amber-800", info: "bg-blue-950/60 border-blue-800",
+};
+
+function AlarmBannerWidget({ w }: { w: Widget }) {
+  const { alarms, ack } = useAlarms();
+  const maxRows = (w.config?.maxRows as number) ?? 5;
+  const showAcked = !!(w.config?.showAcked as boolean);
+  const visible = alarms
+    .filter((a) => a.active || showAcked)
+    .sort((a, b) => {
+      const order = { critical: 0, warning: 1, info: 2 };
+      return (order[a.severity] ?? 9) - (order[b.severity] ?? 9);
+    })
+    .slice(0, maxRows);
+
+  if (visible.length === 0) {
+    return <div className="flex items-center justify-center h-full text-emerald-600 text-xs font-medium">✓ No active alarms</div>;
+  }
+
+  return (
+    <div className="flex flex-col gap-1 h-full overflow-hidden">
+      {visible.map((a) => (
+        <div key={a.id} className={`flex items-center gap-2 px-2 py-1 rounded border text-xs ${sevBg[a.severity] ?? "border-zinc-700"}`}>
+          <span className="font-bold shrink-0 text-[10px] uppercase w-14" style={{ color: sevColor[a.severity] }}>{a.severity}</span>
+          <span className="flex-1 truncate">{a.ruleName}{a.message ? ` — ${a.message}` : ""}</span>
+          <span className="font-mono text-[10px] text-zinc-400 shrink-0">{a.value.toFixed(1)}</span>
+          {a.active && !a.acked && (
+            <button onClick={() => ack(a.id)}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-700 hover:bg-zinc-600 shrink-0">ACK</button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Image ──────────────────────────────────────────────────────────────────
+
+function ImageWidget({ w }: { w: Widget }) {
+  const src = w.config?.src as string | undefined;
+  const fit = (w.config?.fit as string) ?? "contain";
+  if (!src) {
+    return <div className="flex items-center justify-center h-full text-zinc-600 text-xs">No image</div>;
+  }
+  return (
+    <img
+      src={src}
+      alt={(w.config?.label as string) ?? ""}
+      className="w-full h-full"
+      style={{ objectFit: fit as React.CSSProperties["objectFit"] }}
+      draggable={false}
+    />
+  );
+}
+
 const renderers: Record<string, React.ComponentType<{ w: Widget }>> = {
   gauge:          GaugeWidget,
   numericDisplay: NumericDisplayWidget,
@@ -562,11 +882,23 @@ const renderers: Record<string, React.ComponentType<{ w: Widget }>> = {
   textInput:      TextInputWidget,
   historyLog:     HistoryLogWidget,
   multiState:     MultiStateWidget,
+  alarmBanner:    AlarmBannerWidget,
+  image:          ImageWidget,
 };
+
+function VisibilityGate({ w, children }: { w: Widget; children: React.ReactNode }) {
+  const vis = useTag(w.visibleBinding);
+  if (w.visibleBinding && !vis.value) return null;
+  return <>{children}</>;
+}
 
 export function WidgetRenderer({ w }: { w: Widget }) {
   const R = renderers[w.type] ?? (() => (
     <div className="flex items-center justify-center h-full text-zinc-500 text-xs">{w.type}</div>
   ));
-  return <Frame w={w}><R w={w} /></Frame>;
+  return (
+    <VisibilityGate w={w}>
+      <Frame w={w}><R w={w} /></Frame>
+    </VisibilityGate>
+  );
 }
