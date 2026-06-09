@@ -5,24 +5,29 @@ import (
 	"net/http"
 
 	"github.com/Speth12/x-hmi/internal/runtime"
+	"github.com/Speth12/x-hmi/internal/versionstore"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
 // Server bundles the chi router with a runtime reference.
 type Server struct {
-	rt     *runtime.Runtime
-	router chi.Router
+	rt       *runtime.Runtime
+	versions *versionstore.Store
+	router   chi.Router
 }
 
-// New builds a configured Server. assets may be nil; if non-nil it's mounted at /.
-func New(rt *runtime.Runtime, assets http.Handler) *Server {
+// New builds a configured Server. assets and vs may be nil.
+func New(rt *runtime.Runtime, assets http.Handler, vs ...*versionstore.Store) *Server {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 	r.Use(corsMiddleware)
 
 	s := &Server{rt: rt, router: r}
+	if len(vs) > 0 {
+		s.versions = vs[0]
+	}
 	s.routes(assets)
 	return s
 }
@@ -77,6 +82,12 @@ func (s *Server) routes(assets http.Handler) {
 		r.Route("/recipes", func(r chi.Router) {
 			r.Get("/", s.handleListRecipes)
 			r.Post("/{id}/apply", s.handleApplyRecipe)
+		})
+
+		r.Route("/versions", func(r chi.Router) {
+			r.Get("/", s.handleListVersions)
+			r.Get("/{id}", s.handleGetVersion)
+			r.Post("/{id}/restore", s.handleRestoreVersion)
 		})
 	})
 

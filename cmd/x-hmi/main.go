@@ -23,6 +23,7 @@ import (
 	"github.com/Speth12/x-hmi/internal/project"
 	"github.com/Speth12/x-hmi/internal/runtime"
 	"github.com/Speth12/x-hmi/internal/tagstore"
+	"github.com/Speth12/x-hmi/internal/versionstore"
 )
 
 //go:embed ui
@@ -58,7 +59,8 @@ func main() {
 	projectPath := flag.String("project", "", "path to project.json (optional in dev)")
 	historyDB := flag.String("history", "history.db", "SQLite WAL file (use ':memory:' to disable persistence)")
 	historyRetention := flag.Duration("history-retention", 7*24*time.Hour, "how long to keep history (e.g. 48h, 7d)")
-	alarmDB := flag.String("alarm-db", "alarms.db", "SQLite file for alarm event history (use ':memory:' to disable)")
+	alarmDB   := flag.String("alarm-db",   "alarms.db",   "SQLite file for alarm event history (use ':memory:' to disable)")
+	versionDB := flag.String("version-db", "versions.db", "SQLite file for project version history (use ':memory:' to disable)")
 	flag.Parse()
 
 	if *healthcheck {
@@ -113,6 +115,12 @@ func main() {
 	}
 	defer alarmSt.Close()
 
+	versionSt, err := versionstore.Open(*versionDB)
+	if err != nil {
+		log.Fatalf("[X-HMI] versionstore: %v", err)
+	}
+	defer versionSt.Close()
+
 	rt := runtime.New(store, hist)
 	rt.AlarmStore = alarmSt
 	ctx, cancel := context.WithCancel(context.Background())
@@ -136,7 +144,7 @@ func main() {
 	if *mode == "runtime" {
 		assets = spaHandler()
 	}
-	srv := api.New(rt, assets)
+	srv := api.New(rt, assets, versionSt)
 
 	httpSrv := &http.Server{
 		Addr:              *addr,

@@ -14,6 +14,78 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// ── Versions ───────────────────────────────────────────────────────────────
+
+func (s *Server) handleListVersions(w http.ResponseWriter, r *http.Request) {
+	if s.versions == nil {
+		writeErr(w, 503, "version store not configured")
+		return
+	}
+	limit := int(parseInt64(r.URL.Query().Get("limit"), 50))
+	metas, err := s.versions.List(r.Context(), limit)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, metas)
+}
+
+func (s *Server) handleGetVersion(w http.ResponseWriter, r *http.Request) {
+	if s.versions == nil {
+		writeErr(w, 503, "version store not configured")
+		return
+	}
+	id := parseInt64(chi.URLParam(r, "id"), 0)
+	if id == 0 {
+		writeErr(w, 400, "invalid id")
+		return
+	}
+	v, err := s.versions.Get(r.Context(), id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if v == nil {
+		writeErr(w, 404, "version not found")
+		return
+	}
+	writeJSON(w, 200, v)
+}
+
+func (s *Server) handleRestoreVersion(w http.ResponseWriter, r *http.Request) {
+	if s.versions == nil {
+		writeErr(w, 503, "version store not configured")
+		return
+	}
+	id := parseInt64(chi.URLParam(r, "id"), 0)
+	if id == 0 {
+		writeErr(w, 400, "invalid id")
+		return
+	}
+	v, err := s.versions.Get(r.Context(), id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if v == nil {
+		writeErr(w, 404, "version not found")
+		return
+	}
+	p, err := project.Parse(v.Project)
+	if err != nil {
+		writeErr(w, 500, "stored project invalid: "+err.Error())
+		return
+	}
+	if err := s.rt.LoadProject(r.Context(), p); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	// Save the restore itself as a new version so the log stays append-only.
+	label := fmt.Sprintf("restore of version %d", id)
+	newID, _ := s.versions.Save(r.Context(), v.Project, label)
+	writeJSON(w, 200, map[string]any{"ok": true, "restoredFrom": id, "newVersionId": newID})
+}
+
 func (s *Server) handleTestDatasource(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	var ds project.DatasourceElement
@@ -68,7 +140,12 @@ func (s *Server) handlePostProject(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "datasources": len(p.Datasources), "pages": len(p.Pages)})
+	var versionID int64
+	if s.versions != nil {
+		label := r.URL.Query().Get("label")
+		versionID, _ = s.versions.Save(r.Context(), raw, label)
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "datasources": len(p.Datasources), "pages": len(p.Pages), "versionId": versionID})
 }
 
 func (s *Server) handleListDatasources(w http.ResponseWriter, r *http.Request) {
