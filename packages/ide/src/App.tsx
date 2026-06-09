@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { Alarms } from "./panels/Alarms";
 import { Canvas } from "./panels/Canvas";
 import { Header } from "./panels/Header";
 import { LeftPanel } from "./panels/LeftPanel";
 import { Palette } from "./panels/Palette";
 import { Properties } from "./panels/Properties";
+import { Recipes } from "./panels/Recipes";
 import { TagBrowser } from "./panels/TagBrowser";
 import { StatusBar } from "./panels/StatusBar";
 import { useProject } from "./store/projectStore";
@@ -82,7 +84,7 @@ function useDrag(
 export function App() {
   const [showHelp, setShowHelp]     = useState(false);
   const [showJSON, setShowJSON]     = useState(false);
-  const [rightTab, setRightTab]     = useState<"tags" | "properties">("tags");
+  const [rightTab, setRightTab]     = useState<"tags" | "properties" | "alarms" | "recipes">("tags");
   const [rightOpen, setRightOpen]   = useState(true);
   const [leftW, setLeftW]           = useState(260);
   const [rightW, setRightW]         = useState(280);
@@ -143,7 +145,7 @@ export function App() {
         {rightOpen ? (
           <div className="shrink-0 border-l border-zinc-800 bg-zinc-900/50 flex flex-col min-h-0" style={{ width: rightW }}>
             <div className="flex items-center border-b border-zinc-800 shrink-0">
-              {(["tags", "properties"] as const).map((t) => (
+              {(["tags", "properties", "alarms", "recipes"] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => setRightTab(t)}
@@ -165,27 +167,25 @@ export function App() {
               </button>
             </div>
             <div className="flex-1 overflow-auto min-h-0">
-              {rightTab === "tags" ? <TagBrowser /> : <Properties />}
+              {rightTab === "tags"       && <TagBrowser />}
+              {rightTab === "properties" && <Properties />}
+              {rightTab === "alarms"     && <Alarms />}
+              {rightTab === "recipes"    && <Recipes />}
             </div>
           </div>
         ) : (
           <div className="w-7 shrink-0 border-l border-zinc-800 bg-zinc-900/50 flex flex-col items-center pt-2 gap-3">
-            <button
-              onClick={() => { setRightOpen(true); setRightTab("tags"); }}
-              className="text-zinc-600 hover:text-zinc-300 text-[9px] uppercase tracking-widest"
-              style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
-              title="Tags"
-            >
-              Tags
-            </button>
-            <button
-              onClick={() => { setRightOpen(true); setRightTab("properties"); }}
-              className="text-zinc-600 hover:text-zinc-300 text-[9px] uppercase tracking-widest"
-              style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
-              title="Properties"
-            >
-              Props
-            </button>
+            {(["tags", "properties", "alarms", "recipes"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => { setRightOpen(true); setRightTab(t); }}
+                className="text-zinc-600 hover:text-zinc-300 text-[9px] uppercase tracking-widest"
+                style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+                title={t}
+              >
+                {t === "properties" ? "Props" : t.slice(0, 5)}
+              </button>
+            ))}
           </div>
         )}
       </div>
