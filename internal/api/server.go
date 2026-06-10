@@ -89,6 +89,14 @@ func (s *Server) routes(assets http.Handler) {
 			r.Get("/{id}", s.handleGetVersion)
 			r.Post("/{id}/restore", s.handleRestoreVersion)
 		})
+
+		r.Route("/namespace", func(r chi.Router) {
+			r.Get("/", s.handleNSList)
+			r.Get("/tree", s.handleNSChildren)
+			r.Get("/search", s.handleNSSearch)
+			r.Post("/", s.handleNSCreate)
+			r.Delete("/*", s.handleNSDelete)
+		})
 	})
 
 	r.Get("/ws/tags", s.handleWS)

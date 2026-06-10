@@ -263,3 +263,20 @@ func (h *Historian) trim() error {
 	_, err := h.db.Exec(`DELETE FROM history WHERE ts < ?`, cutoff)
 	return err
 }
+
+// DeleteBefore satisfies the Provider interface.
+func (h *Historian) DeleteBefore(ctx context.Context, cutoff int64) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, err := h.db.ExecContext(ctx, `DELETE FROM history WHERE ts < ?`, cutoff)
+	return err
+}
+
+// Write satisfies the Provider interface (single-sample write without TagUpdate wrapper).
+func (h *Historian) Write(ctx context.Context, path string, ts int64, value any, quality string) error {
+	b, _ := json.Marshal(value)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, err := h.insertStmt.ExecContext(ctx, path, ts, string(b), quality)
+	return err
+}
