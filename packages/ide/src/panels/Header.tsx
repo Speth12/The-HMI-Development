@@ -156,11 +156,12 @@ function ThemePicker() {
 
 type HeaderProps = {
   onHelp: () => void;
+  onDemo: () => void;
   showJSON: boolean;
   onToggleJSON: () => void;
 };
 
-export function Header({ onHelp, showJSON, onToggleJSON }: HeaderProps) {
+export function Header({ onHelp, onDemo, showJSON, onToggleJSON }: HeaderProps) {
   const { exportJSON, loadProject } = useProject();
   const { canUndo, canRedo, undo, redo } = useProject(
     useShallow((s) => ({ canUndo: s.canUndo, canRedo: s.canRedo, undo: s.undo, redo: s.redo }))
@@ -304,6 +305,10 @@ export function Header({ onHelp, showJSON, onToggleJSON }: HeaderProps) {
 
       {/* Theme */}
       <ThemePicker />
+
+      {/* Demo */}
+      <button onClick={onDemo} title="Platform feature demo"
+        className="text-xs px-2 py-1 rounded bg-violet-700 hover:bg-violet-600 text-white font-medium shrink-0">Demo</button>
 
       {/* Help */}
       <button onClick={onHelp} title="Keyboard shortcuts (?)"

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { Alarms } from "./panels/Alarms";
 import { Canvas } from "./panels/Canvas";
+import { DemoModal } from "./panels/Demo";
 import { Header } from "./panels/Header";
 import { LeftPanel } from "./panels/LeftPanel";
 import { Palette } from "./panels/Palette";
@@ -83,6 +84,7 @@ function useDrag(
 
 export function App() {
   const [showHelp, setShowHelp]     = useState(false);
+  const [showDemo, setShowDemo]     = useState(false);
   const [showJSON, setShowJSON]     = useState(false);
   const [rightTab, setRightTab]     = useState<"tags" | "properties" | "alarms" | "recipes">("tags");
   const [rightOpen, setRightOpen]   = useState(true);
@@ -111,6 +113,7 @@ export function App() {
       {/* ── Top bar ───────────────────────────────────────────────────── */}
       <Header
         onHelp={() => setShowHelp((v) => !v)}
+        onDemo={() => setShowDemo(true)}
         showJSON={showJSON}
         onToggleJSON={() => setShowJSON((v) => !v)}
       />
@@ -192,6 +195,7 @@ export function App() {
 
       <StatusBar />
       {showHelp && <ShortcutModal onClose={() => setShowHelp(false)} />}
+      {showDemo && <DemoModal onClose={() => setShowDemo(false)} />}
     </div>
   );
 }
