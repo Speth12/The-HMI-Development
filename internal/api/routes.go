@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/Speth12/x-hmi/internal/alarmstore"
+	"github.com/Speth12/x-hmi/internal/audit"
 	"github.com/Speth12/x-hmi/internal/project"
+	"github.com/Speth12/x-hmi/internal/recipestore"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -145,6 +147,7 @@ func (s *Server) handlePostProject(w http.ResponseWriter, r *http.Request) {
 		label := r.URL.Query().Get("label")
 		versionID, _ = s.versions.Save(r.Context(), raw, label)
 	}
+	s.recordAudit(r, audit.ActionProjectDeploy, "", nil, nil, fmt.Sprintf("pages=%d datasources=%d", len(p.Pages), len(p.Datasources)))
 	writeJSON(w, 200, map[string]any{"ok": true, "datasources": len(p.Datasources), "pages": len(p.Pages), "versionId": versionID})
 }
 
@@ -239,11 +242,11 @@ func (s *Server) handleWriteTag(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	// Audit: record the write to history so operators can see who changed what.
+	fullPath := body.Datasource + ":" + path
 	if s.rt.Historian != nil {
-		fullPath := body.Datasource + ":" + path
 		_ = s.rt.Historian.RecordWrite(fullPath, body.Value)
 	}
+	s.recordAudit(r, audit.ActionTagWrite, fullPath, nil, body.Value, "")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -386,6 +389,7 @@ func (s *Server) handleAckAlarm(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "event not found")
 		return
 	}
+	s.recordAudit(r, audit.ActionAlarmAck, id, nil, nil, "")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -400,46 +404,196 @@ func (s *Server) handleListRecipes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, p.Recipes)
 }
 
-func (s *Server) handleApplyRecipe(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRecipeHistory(w http.ResponseWriter, r *http.Request) {
+	if s.rt.Recipes == nil {
+		writeErr(w, 503, "recipe store not configured")
+		return
+	}
+	q := r.URL.Query()
+	recipeID := q.Get("recipeId")
+	limit := int(parseInt64(q.Get("limit"), 50))
+	runs, err := s.rt.Recipes.ListRuns(r.Context(), recipeID, limit)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if runs == nil {
+		runs = []*recipestore.Run{}
+	}
+	writeJSON(w, 200, runs)
+}
+
+func (s *Server) handleListPendingRecipes(w http.ResponseWriter, r *http.Request) {
+	if s.rt.Recipes == nil {
+		writeErr(w, 503, "recipe store not configured")
+		return
+	}
+	status := recipestore.Status(r.URL.Query().Get("status"))
+	if status == "" {
+		status = recipestore.StatusPending
+	}
+	pending, err := s.rt.Recipes.ListPending(r.Context(), status, 100)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if pending == nil {
+		pending = []*recipestore.PendingRequest{}
+	}
+	writeJSON(w, 200, pending)
+}
+
+// handleRequestRecipe creates a pending approval request (any authenticated user).
+func (s *Server) handleRequestRecipe(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	p := s.rt.Project()
-	if p == nil {
+	rec, name := s.findRecipe(id)
+	if rec == nil {
+		writeErr(w, 404, "recipe not found")
+		return
+	}
+	if s.rt.Recipes == nil {
+		writeErr(w, 503, "recipe store not configured")
+		return
+	}
+	entries := make([]recipestore.Entry, len(rec))
+	for i, e := range rec {
+		entries[i] = recipestore.Entry{Binding: e.Binding, Value: e.Value}
+	}
+	pendingID, err := s.rt.Recipes.CreatePending(r.Context(), recipestore.PendingRequest{
+		RecipeID:    id,
+		RecipeName:  name,
+		RequestedBy: claimedUser(r),
+		RequestedAt: time.Now(),
+		Entries:     entries,
+	})
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 201, map[string]any{"ok": true, "pendingId": pendingID})
+}
+
+// handleApproveRecipe approves a pending request and executes it.
+func (s *Server) handleApproveRecipe(w http.ResponseWriter, r *http.Request) {
+	s.reviewRecipe(w, r, true)
+}
+
+func (s *Server) handleRejectRecipe(w http.ResponseWriter, r *http.Request) {
+	s.reviewRecipe(w, r, false)
+}
+
+func (s *Server) reviewRecipe(w http.ResponseWriter, r *http.Request, approve bool) {
+	if s.rt.Recipes == nil {
+		writeErr(w, 503, "recipe store not configured")
+		return
+	}
+	pendingID := parseInt64(chi.URLParam(r, "pendingId"), 0)
+	if pendingID == 0 {
+		writeErr(w, 400, "invalid pendingId")
+		return
+	}
+	defer r.Body.Close()
+	var body struct {
+		Note string `json:"note"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	reviewer := claimedUser(r)
+	var (
+		req *recipestore.PendingRequest
+		err error
+	)
+	if approve {
+		req, err = s.rt.Recipes.Approve(r.Context(), pendingID, reviewer, body.Note)
+	} else {
+		req, err = s.rt.Recipes.Reject(r.Context(), pendingID, reviewer, body.Note)
+	}
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if !approve {
+		writeJSON(w, 200, map[string]any{"ok": true, "status": "rejected"})
+		return
+	}
+	// Execute the approved recipe.
+	errs, applied := s.executeRecipeEntries(r, req.Entries)
+	s.rt.Recipes.RecordRun(r.Context(), recipestore.Run{ //nolint
+		RecipeID:     req.RecipeID,
+		RecipeName:   req.RecipeName,
+		AppliedBy:    reviewer,
+		AppliedAt:    time.Now(),
+		Entries:      req.Entries,
+		AppliedCount: applied,
+		Errors:       errs,
+	})
+	s.recordAudit(r, audit.ActionRecipeApply, req.RecipeID, nil, nil,
+		fmt.Sprintf("via approval %d applied=%d errors=%d", pendingID, applied, len(errs)))
+	if len(errs) > 0 {
+		writeJSON(w, 207, map[string]any{"ok": false, "errors": errs, "applied": applied})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "applied": applied})
+}
+
+func (s *Server) handleApplyRecipe(w http.ResponseWriter, r *http.Request) {
+	if s.rt.Project() == nil {
 		writeErr(w, 503, "no project loaded")
 		return
 	}
-
-	var recipe *struct {
-		ID      string
-		Entries []struct {
-			Binding string `json:"binding"`
-			Value   any    `json:"value"`
-		}
-	}
-	for _, rec := range p.Recipes {
-		if rec.ID == id {
-			recipe = &struct {
-				ID      string
-				Entries []struct {
-					Binding string `json:"binding"`
-					Value   any    `json:"value"`
-				}
-			}{ID: rec.ID}
-			for _, e := range rec.Entries {
-				recipe.Entries = append(recipe.Entries, struct {
-					Binding string `json:"binding"`
-					Value   any    `json:"value"`
-				}{Binding: e.Binding, Value: e.Value})
-			}
-			break
-		}
-	}
-	if recipe == nil {
+	id := chi.URLParam(r, "id")
+	rec, name := s.findRecipe(id)
+	if rec == nil {
 		writeErr(w, 404, "recipe not found")
 		return
 	}
 
+	entries := make([]recipestore.Entry, len(rec))
+	for i, e := range rec {
+		entries[i] = recipestore.Entry{Binding: e.Binding, Value: e.Value}
+	}
+	errs, applied := s.executeRecipeEntries(r, entries)
+
+	if s.rt.Recipes != nil {
+		s.rt.Recipes.RecordRun(r.Context(), recipestore.Run{ //nolint
+			RecipeID:     id,
+			RecipeName:   name,
+			AppliedBy:    claimedUser(r),
+			AppliedAt:    time.Now(),
+			Entries:      entries,
+			AppliedCount: applied,
+			Errors:       errs,
+		})
+	}
+	s.recordAudit(r, audit.ActionRecipeApply, id, nil, nil,
+		fmt.Sprintf("applied=%d errors=%d", applied, len(errs)))
+
+	if len(errs) > 0 {
+		writeJSON(w, 207, map[string]any{"ok": false, "errors": errs, "applied": applied})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "applied": applied})
+}
+
+// findRecipe looks up a recipe in the loaded project. Returns (entries, name) or (nil, "").
+func (s *Server) findRecipe(id string) ([]project.EntryElement, string) {
+	p := s.rt.Project()
+	if p == nil {
+		return nil, ""
+	}
+	for _, rec := range p.Recipes {
+		if rec.ID == id {
+			return rec.Entries, rec.Name
+		}
+	}
+	return nil, ""
+}
+
+// executeRecipeEntries writes all tag entries, returns (errors, appliedCount).
+func (s *Server) executeRecipeEntries(r *http.Request, entries []recipestore.Entry) ([]string, int) {
 	var errs []string
-	for _, entry := range recipe.Entries {
+	applied := 0
+	for _, entry := range entries {
 		sep := strings.Index(entry.Binding, ":")
 		if sep < 0 {
 			errs = append(errs, "bad binding: "+entry.Binding)
@@ -459,11 +613,7 @@ func (s *Server) handleApplyRecipe(w http.ResponseWriter, r *http.Request) {
 		if s.rt.Historian != nil {
 			_ = s.rt.Historian.RecordWrite(entry.Binding, entry.Value)
 		}
+		applied++
 	}
-
-	if len(errs) > 0 {
-		writeJSON(w, 207, map[string]any{"ok": false, "errors": errs, "applied": len(recipe.Entries) - len(errs)})
-		return
-	}
-	writeJSON(w, 200, map[string]any{"ok": true, "applied": len(recipe.Entries)})
+	return errs, applied
 }

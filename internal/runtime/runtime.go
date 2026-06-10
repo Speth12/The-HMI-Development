@@ -11,6 +11,8 @@ import (
 
 	"github.com/Speth12/x-hmi/internal/alarmstore"
 	"github.com/Speth12/x-hmi/internal/alarms"
+	"github.com/Speth12/x-hmi/internal/assets"
+	"github.com/Speth12/x-hmi/internal/audit"
 	"github.com/Speth12/x-hmi/internal/drivers"
 	_ "github.com/Speth12/x-hmi/internal/drivers/modbus"
 	_ "github.com/Speth12/x-hmi/internal/drivers/mqtt"
@@ -18,9 +20,12 @@ import (
 	_ "github.com/Speth12/x-hmi/internal/drivers/rest"
 	_ "github.com/Speth12/x-hmi/internal/drivers/virtual"
 	"github.com/Speth12/x-hmi/internal/eventbus"
+	"github.com/Speth12/x-hmi/internal/faceplate"
 	"github.com/Speth12/x-hmi/internal/historian"
 	"github.com/Speth12/x-hmi/internal/namespace"
 	"github.com/Speth12/x-hmi/internal/project"
+	"github.com/Speth12/x-hmi/internal/recipestore"
+	"github.com/Speth12/x-hmi/internal/security"
 	"github.com/Speth12/x-hmi/internal/tagstore"
 )
 
@@ -32,6 +37,13 @@ type Runtime struct {
 	AlarmStore *alarmstore.AlarmStore
 	Namespace  *namespace.Tree
 	Events     *eventbus.Bus
+
+	// Optional — nil in dev/test mode.
+	Security  *security.Store
+	Audit     *audit.Store
+	Assets    *assets.Registry
+	Faceplates *faceplate.Registry
+	Recipes   *recipestore.Store
 
 	mu       sync.RWMutex
 	drivers  map[string]drivers.ProtocolDriver // datasource id → driver

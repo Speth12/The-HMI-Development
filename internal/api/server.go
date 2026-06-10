@@ -54,10 +54,17 @@ func (s *Server) Handler() http.Handler { return s.router }
 func (s *Server) routes(assets http.Handler) {
 	r := s.router
 
+	// Public: login
+	r.Post("/api/v1/auth/login", s.handleLogin)
+
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(s.jwtMiddleware)
+
 		r.Get("/alive", s.handleAlive)
+		r.Get("/whoami", s.handleWhoAmI)
+
 		r.Get("/project", s.handleGetProject)
-		r.Post("/project", s.handlePostProject)
+		r.With(s.requirePerm("project.deploy")).Post("/project", s.handlePostProject)
 
 		r.Route("/datasources", func(r chi.Router) {
 			r.Get("/", s.handleListDatasources)
@@ -68,7 +75,7 @@ func (s *Server) routes(assets http.Handler) {
 
 		r.Route("/tag", func(r chi.Router) {
 			r.Get("/*", s.handleReadTag)
-			r.Post("/*", s.handleWriteTag)
+			r.With(s.requirePerm("tag.write")).Post("/*", s.handleWriteTag)
 		})
 
 		r.Get("/history", s.handleHistory)
@@ -76,18 +83,23 @@ func (s *Server) routes(assets http.Handler) {
 		r.Route("/alarms", func(r chi.Router) {
 			r.Get("/", s.handleListAlarms)
 			r.Get("/history", s.handleAlarmHistory)
-			r.Post("/{id}/ack", s.handleAckAlarm)
+			r.With(s.requirePerm("alarm.ack")).Post("/{id}/ack", s.handleAckAlarm)
 		})
 
 		r.Route("/recipes", func(r chi.Router) {
 			r.Get("/", s.handleListRecipes)
-			r.Post("/{id}/apply", s.handleApplyRecipe)
+			r.Get("/history", s.handleRecipeHistory)
+			r.Get("/pending", s.handleListPendingRecipes)
+			r.With(s.requirePerm("recipe.apply")).Post("/{id}/apply", s.handleApplyRecipe)
+			r.Post("/{id}/request", s.handleRequestRecipe)
+			r.With(s.requirePerm("recipe.apply")).Post("/pending/{pendingId}/approve", s.handleApproveRecipe)
+			r.With(s.requirePerm("recipe.apply")).Post("/pending/{pendingId}/reject", s.handleRejectRecipe)
 		})
 
 		r.Route("/versions", func(r chi.Router) {
 			r.Get("/", s.handleListVersions)
 			r.Get("/{id}", s.handleGetVersion)
-			r.Post("/{id}/restore", s.handleRestoreVersion)
+			r.With(s.requirePerm("project.deploy")).Post("/{id}/restore", s.handleRestoreVersion)
 		})
 
 		r.Route("/namespace", func(r chi.Router) {
@@ -96,6 +108,33 @@ func (s *Server) routes(assets http.Handler) {
 			r.Get("/search", s.handleNSSearch)
 			r.Post("/", s.handleNSCreate)
 			r.Delete("/*", s.handleNSDelete)
+		})
+
+		r.Route("/assets", func(r chi.Router) {
+			r.Get("/templates", s.handleListTemplates)
+			r.Get("/templates/{id}", s.handleGetTemplate)
+			r.With(s.requirePerm("project.deploy")).Post("/templates", s.handleRegisterTemplate)
+			r.Get("/instances", s.handleListInstances)
+			r.Get("/instances/{id}", s.handleGetInstance)
+			r.With(s.requirePerm("project.deploy")).Post("/instances", s.handleCreateInstance)
+			r.With(s.requirePerm("project.deploy")).Delete("/instances/{id}", s.handleDeleteInstance)
+		})
+
+		r.Route("/faceplates", func(r chi.Router) {
+			r.With(s.requirePerm("project.deploy")).Post("/", s.handleRegisterFaceplateView)
+			r.Get("/{instanceId}", s.handleListFaceplateViews)
+			r.Get("/{instanceId}/{viewType}", s.handleGetFaceplateView)
+		})
+
+		r.With(s.requirePerm("project.deploy")).Get("/audit", s.handleListAudit)
+
+		r.Route("/users", func(r chi.Router) {
+			r.With(s.requirePerm("users.manage")).Get("/", s.handleListUsers)
+			r.With(s.requirePerm("users.manage")).Post("/", s.handleCreateUser)
+			r.With(s.requirePerm("users.manage")).Put("/{username}/role", s.handleSetUserRole)
+			r.With(s.requirePerm("users.manage")).Put("/{username}/enabled", s.handleSetUserEnabled)
+			r.With(s.requirePerm("users.manage")).Delete("/{username}", s.handleDeleteUser)
+			r.Post("/{username}/password", s.handleChangePassword)
 		})
 	})
 

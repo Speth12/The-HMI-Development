@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"embed"
 	"encoding/json"
 	"flag"
@@ -19,9 +20,16 @@ import (
 
 	"github.com/Speth12/x-hmi/internal/alarmstore"
 	"github.com/Speth12/x-hmi/internal/api"
+	"github.com/Speth12/x-hmi/internal/assets"
+	"github.com/Speth12/x-hmi/internal/audit"
+	"github.com/Speth12/x-hmi/internal/faceplate"
 	"github.com/Speth12/x-hmi/internal/historian"
+	_ "github.com/Speth12/x-hmi/internal/historian/providers/memory"
+	_ "github.com/Speth12/x-hmi/internal/historian/providers/sqlite"
 	"github.com/Speth12/x-hmi/internal/project"
+	"github.com/Speth12/x-hmi/internal/recipestore"
 	"github.com/Speth12/x-hmi/internal/runtime"
+	"github.com/Speth12/x-hmi/internal/security"
 	"github.com/Speth12/x-hmi/internal/tagstore"
 	"github.com/Speth12/x-hmi/internal/versionstore"
 )
@@ -59,8 +67,12 @@ func main() {
 	projectPath := flag.String("project", "", "path to project.json (optional in dev)")
 	historyDB := flag.String("history", "history.db", "SQLite WAL file (use ':memory:' to disable persistence)")
 	historyRetention := flag.Duration("history-retention", 7*24*time.Hour, "how long to keep history (e.g. 48h, 7d)")
-	alarmDB   := flag.String("alarm-db",   "alarms.db",   "SQLite file for alarm event history (use ':memory:' to disable)")
-	versionDB := flag.String("version-db", "versions.db", "SQLite file for project version history (use ':memory:' to disable)")
+	alarmDB    := flag.String("alarm-db",    "alarms.db",    "SQLite file for alarm event history")
+	versionDB  := flag.String("version-db",  "versions.db",  "SQLite file for project version history")
+	securityDB := flag.String("security-db", "security.db",  "SQLite file for users and sessions (empty = open/dev mode)")
+	auditDB    := flag.String("audit-db",    "audit.db",     "SQLite file for audit log (empty = disabled)")
+	recipeDB   := flag.String("recipe-db",   "recipes.db",   "SQLite file for recipe history and approvals")
+	jwtSecret  := flag.String("jwt-secret",  "",             "JWT signing secret (random 32+ bytes); auto-generated if empty")
 	flag.Parse()
 
 	if *healthcheck {
@@ -123,6 +135,49 @@ func main() {
 
 	rt := runtime.New(store, hist)
 	rt.AlarmStore = alarmSt
+
+	// Security (optional; dev mode works without it).
+	if *securityDB != "" {
+		secret := []byte(*jwtSecret)
+		if len(secret) == 0 {
+			secret = generateSecret()
+		}
+		secSt, err := security.Open(*securityDB, secret)
+		if err != nil {
+			log.Fatalf("[X-HMI] security: %v", err)
+		}
+		defer secSt.Close()
+		rt.Security = secSt
+		log.Printf("[X-HMI] security DB: %s", *securityDB)
+	}
+
+	// Audit log (optional).
+	if *auditDB != "" {
+		auditSt, err := audit.Open(*auditDB)
+		if err != nil {
+			log.Fatalf("[X-HMI] audit: %v", err)
+		}
+		defer auditSt.Close()
+		rt.Audit = auditSt
+		log.Printf("[X-HMI] audit DB: %s", *auditDB)
+	}
+
+	// Recipe history + approvals (optional).
+	if *recipeDB != "" {
+		recipeSt, err := recipestore.Open(*recipeDB)
+		if err != nil {
+			log.Fatalf("[X-HMI] recipestore: %v", err)
+		}
+		defer recipeSt.Close()
+		rt.Recipes = recipeSt
+		log.Printf("[X-HMI] recipe DB: %s", *recipeDB)
+	}
+
+	// Asset model + faceplate registry (always active).
+	assetRegistry := assets.New()
+	rt.Assets = assetRegistry
+	rt.Faceplates = faceplate.New(assetRegistry)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	rt.Start(ctx)
@@ -167,4 +222,13 @@ func main() {
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutCancel()
 	_ = httpSrv.Shutdown(shutCtx)
+}
+
+func generateSecret() []byte {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		log.Fatalf("[X-HMI] crypto/rand: %v", err)
+	}
+	log.Println("[X-HMI] WARNING: JWT secret auto-generated; tokens will be invalidated on restart. Pass --jwt-secret for persistence.")
+	return b
 }
