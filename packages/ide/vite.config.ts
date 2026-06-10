@@ -10,7 +10,8 @@ const runtimeAddr = process.env.VITE_RUNTIME_ADDR ?? "localhost:8080";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    port: 5173,
+    port: process.env.PORT ? Number(process.env.PORT) : 5173,
+    strictPort: false,
     proxy: {
       "/api": `http://${runtimeAddr}`,
       "/ws": { target: `ws://${runtimeAddr}`, ws: true },
