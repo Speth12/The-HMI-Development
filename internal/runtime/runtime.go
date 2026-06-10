@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,7 +17,9 @@ import (
 	_ "github.com/Speth12/x-hmi/internal/drivers/opcua"
 	_ "github.com/Speth12/x-hmi/internal/drivers/rest"
 	_ "github.com/Speth12/x-hmi/internal/drivers/virtual"
+	"github.com/Speth12/x-hmi/internal/eventbus"
 	"github.com/Speth12/x-hmi/internal/historian"
+	"github.com/Speth12/x-hmi/internal/namespace"
 	"github.com/Speth12/x-hmi/internal/project"
 	"github.com/Speth12/x-hmi/internal/tagstore"
 )
@@ -27,6 +30,8 @@ type Runtime struct {
 	Historian  *historian.Historian
 	Alarms     *alarms.Engine
 	AlarmStore *alarmstore.AlarmStore
+	Namespace  *namespace.Tree
+	Events     *eventbus.Bus
 
 	mu       sync.RWMutex
 	drivers  map[string]drivers.ProtocolDriver // datasource id → driver
@@ -47,6 +52,8 @@ func New(store *tagstore.TagStore, h *historian.Historian) *Runtime {
 		Store:     store,
 		Historian: h,
 		Alarms:    alarms.New(),
+		Namespace: namespace.New(),
+		Events:    eventbus.New(),
 		drivers:   make(map[string]drivers.ProtocolDriver),
 		pumpCh:    make(chan tagstore.TagUpdate, 1024),
 	}
@@ -97,6 +104,29 @@ func (r *Runtime) LoadProject(ctx context.Context, p *project.Project) error {
 		})
 	}
 	r.Alarms.SetRules(rules)
+
+	// Publish all widget bindings into the namespace.
+	for _, ds := range p.Datasources {
+		prefix := ds.ID + ":"
+		for _, pg := range p.Pages {
+			for _, w := range pg.Widgets {
+				if w.Binding == nil || *w.Binding == "" {
+					continue
+				}
+				b := *w.Binding
+				if strings.HasPrefix(b, prefix) {
+					tagPath := b[len(prefix):]
+					nsPath := ds.ID + "." + strings.ReplaceAll(tagPath, ":", ".")
+					_, _ = r.Namespace.PublishDriverTag(nsPath, ds.ID, tagPath, "")
+				}
+			}
+		}
+	}
+
+	r.Events.Publish(eventbus.Event{
+		Type:    eventbus.EventProjectLoaded,
+		Payload: map[string]any{"pages": len(p.Pages), "datasources": len(p.Datasources)},
+	})
 
 	r.mu.Lock()
 	r.project = p
