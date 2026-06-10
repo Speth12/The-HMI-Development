@@ -8,6 +8,7 @@ import {
   setActiveTarget, addTarget, updateTarget, removeTarget,
   type Target,
 } from "../store/targetsStore";
+import { themes, applyTheme, getThemeById, getStoredThemeId } from "../store/themes";
 
 // ── Manage Targets modal ───────────────────────────────────────────────────
 
@@ -116,6 +117,37 @@ function ManageTargetsModal({ onClose }: { onClose: () => void }) {
           <div className="text-[10px] text-zinc-600">URL is the X-HMI runtime base, e.g. http://10.0.0.210:8080</div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Theme picker ───────────────────────────────────────────────────────────
+
+function ThemePicker() {
+  const [activeId, setActiveId] = useState(getStoredThemeId);
+
+  const pick = (id: string) => {
+    const t = getThemeById(id);
+    applyTheme(t);
+    setActiveId(id);
+  };
+
+  // Apply stored theme on mount
+  useEffect(() => { applyTheme(getThemeById(activeId)); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="flex items-center gap-1 shrink-0">
+      <span className="text-[10px] text-zinc-500">theme</span>
+      <select
+        value={activeId}
+        onChange={(e) => pick(e.target.value)}
+        className="text-[11px] bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-zinc-200 max-w-[140px] truncate"
+        style={{ background: "var(--secondary)", color: "var(--foreground)", borderColor: "var(--border)" }}
+      >
+        {themes.map((t) => (
+          <option key={t.id} value={t.id}>{t.name}</option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -269,6 +301,9 @@ export function Header({ onHelp, showJSON, onToggleJSON }: HeaderProps) {
         className="text-xs px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 font-medium shrink-0">
         {busy === "deploy" ? "deploying…" : "Deploy"}
       </button>
+
+      {/* Theme */}
+      <ThemePicker />
 
       {/* Help */}
       <button onClick={onHelp} title="Keyboard shortcuts (?)"

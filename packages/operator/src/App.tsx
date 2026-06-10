@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { WidgetRenderer, type Widget } from "./widgets";
 import { WriteConfirmContext, NavigateContext, type WriteRequest } from "./writeContext";
 import { AlarmContext, type AlarmEvent } from "./alarmContext";
+import { themes, applyTheme, getThemeById, getStoredThemeId } from "./store/themes";
 
 type Page = { id: string; name: string; widgets: Widget[] };
 type Project = {
@@ -195,12 +196,12 @@ export function App() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const cellPx = 80; // fixed cell size — widgets don't scale with viewport
 
-  // Light mode — persisted in localStorage
-  const [lightMode, setLightMode] = useState(() => localStorage.getItem("xhmi-theme") === "light");
+  // Theme — persisted in localStorage via applyTheme
+  const [themeId, setThemeId] = useState(getStoredThemeId);
+
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", lightMode ? "light" : "dark");
-    localStorage.setItem("xhmi-theme", lightMode ? "light" : "dark");
-  }, [lightMode]);
+    applyTheme(getThemeById(themeId));
+  }, [themeId]);
 
   // Kiosk swipe — touch start X ref
   const touchStartX = useRef(0);
@@ -425,13 +426,17 @@ export function App() {
             >
               ⚙ Recipes
             </button>
-            <button
-              onClick={() => setLightMode((v) => !v)}
-              title="Toggle light/dark mode"
-              className="text-xs px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400"
+            <select
+              value={themeId}
+              onChange={(e) => setThemeId(e.target.value)}
+              className="text-[11px] rounded px-1.5 py-0.5 text-zinc-200 max-w-[140px] truncate"
+              style={{ background: "var(--secondary)", color: "var(--foreground)", borderColor: "var(--border)", border: "1px solid" }}
+              title="Switch theme"
             >
-              {lightMode ? "🌙" : "☀️"}
-            </button>
+              {themes.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
             {project.pin && (
               <button
                 onClick={() => { setAuthed(false); sessionStorage.removeItem("xhmi-authed"); }}

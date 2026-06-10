@@ -1,14 +1,73 @@
 @import "tailwindcss";
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: #09090b; color: #f4f4f5; font-family: system-ui, sans-serif; }
+body { background: var(--background); color: var(--foreground); font-family: var(--font-mono, system-ui, sans-serif); }
 
-/* ── Light mode ─────────────────────────────────────────────────────────── */
-:root[data-theme="light"] {
-  filter: invert(1) hue-rotate(180deg);
+/* ── HMI theme CSS variables (defaults = SCADA Industrial) ────────────────── */
+:root {
+  --background:          #0c0e10;
+  --foreground:          #dde2e6;
+  --card:                #141719;
+  --card-foreground:     #dde2e6;
+  --primary:             #f0a500;
+  --primary-foreground:  #0c0e10;
+  --secondary:           #1e2124;
+  --secondary-foreground:#9ba3ac;
+  --muted:               #1a1d20;
+  --muted-foreground:    #6b7480;
+  --border:              #2a2f35;
+  --radius:              3px;
+  --danger:              #ff3b30;
+  --warning:             #ff9500;
+  --success:             #30d158;
+  --font-mono:           'JetBrains Mono', monospace;
 }
-:root[data-theme="light"] img,
-:root[data-theme="light"] video,
-:root[data-theme="light"] canvas {
-  filter: invert(1) hue-rotate(180deg);
+
+/* ── Background patterns ──────────────────────────────────────────────────── */
+:root[data-bg-pattern="grid"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 32px 32px;
+  opacity: 0.4;
+  z-index: 0;
 }
+
+:root[data-bg-pattern="dots"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
+  background-size: 24px 24px;
+  opacity: 0.5;
+  z-index: 0;
+}
+
+:root[data-bg-pattern="crosshatch"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(45deg, var(--border) 1px, transparent 1px),
+    linear-gradient(-45deg, var(--border) 1px, transparent 1px);
+  background-size: 16px 16px;
+  opacity: 0.35;
+  z-index: 0;
+}
+
+/* ── Glass card style ─────────────────────────────────────────────────────── */
+:root[data-card-style="glass"] .panel-card {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ── Glow effects ─────────────────────────────────────────────────────────── */
+:root[data-glow="true"] .status-dot-good   { box-shadow: 0 0 6px var(--success); }
+:root[data-glow="true"] .status-dot-warn   { box-shadow: 0 0 6px var(--warning); }
+:root[data-glow="true"] .status-dot-danger { box-shadow: 0 0 6px var(--danger); }
