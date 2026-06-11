@@ -300,7 +300,7 @@ function RefLinesEditor({ w, setConfig, inp, label }: {
   );
 }
 
-// ── Image upload editor ────────────────────────────────────────────────────
+// ── Image source editor ────────────────────────────────────────────────────
 
 function ImageUploadEditor({ setConfig, cfgStr, inp, label }: {
   setConfig: (k: string, v: unknown) => void;
@@ -309,6 +309,13 @@ function ImageUploadEditor({ setConfig, cfgStr, inp, label }: {
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const src = cfgStr("src");
+  const images = useProject(s => s.project.images ?? []);
+
+  // Resolve current src for preview
+  const isLib = src.startsWith("lib:");
+  const libId = isLib ? src.slice(4) : null;
+  const libAsset = libId ? images.find(i => i.id === libId) : null;
+  const previewSrc = isLib ? (libAsset?.dataUrl ?? null) : (src || null);
 
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -320,19 +327,64 @@ function ImageUploadEditor({ setConfig, cfgStr, inp, label }: {
   };
 
   return (
-    <div className="space-y-1.5">
-      {label("Image file")}
+    <div className="space-y-2">
+      {/* Library picker */}
+      {images.length > 0 && (
+        <div>
+          {label("From image library")}
+          <div className="grid grid-cols-3 gap-1 mt-1 max-h-40 overflow-auto">
+            {images.map(img => (
+              <button
+                key={img.id}
+                onClick={() => setConfig("src", `lib:${img.id}`)}
+                title={img.name}
+                className={`rounded border p-0.5 transition-colors ${
+                  libId === img.id
+                    ? "border-blue-500 bg-blue-950/30"
+                    : "border-zinc-700 hover:border-zinc-500 bg-zinc-800/40"
+                }`}
+              >
+                <img src={img.dataUrl} alt={img.name}
+                  className="w-full object-contain rounded"
+                  style={{ height: 40 }} />
+              </button>
+            ))}
+          </div>
+          {images.length > 0 && (
+            <div className="text-[9px] text-zinc-600 mt-1">Click to select · or use URL / upload below</div>
+          )}
+        </div>
+      )}
+
+      {/* URL input */}
+      <div>
+        {label("Image URL")}
+        <input
+          value={isLib ? "" : src}
+          onChange={e => setConfig("src", e.target.value)}
+          placeholder="https://… or leave blank"
+          className={`mt-1 ${inp}`}
+        />
+      </div>
+
+      {/* Upload fallback */}
       <button onClick={() => fileRef.current?.click()}
         className="w-full py-1.5 text-xs rounded bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 border-dashed">
-        {src ? "Replace image…" : "Upload image…"}
+        Upload from file…
       </button>
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
-      {src && (
-        <>
-          <img src={src} alt="" className="w-full max-h-24 object-contain rounded border border-zinc-700 bg-zinc-950" />
+
+      {/* Preview + clear */}
+      {previewSrc && (
+        <div className="space-y-1">
+          <img src={previewSrc} alt=""
+            className="w-full max-h-24 object-contain rounded border border-zinc-700 bg-zinc-950" />
+          {libAsset && (
+            <div className="text-[10px] text-zinc-500 text-center">{libAsset.name} · {libAsset.width}×{libAsset.height}</div>
+          )}
           <button onClick={() => setConfig("src", undefined)}
             className="text-[10px] text-red-500 hover:text-red-400">Remove image</button>
-        </>
+        </div>
       )}
     </div>
   );

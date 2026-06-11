@@ -1,6 +1,7 @@
 // Widget renderers — read, write, and trend support.
 import { useEffect, useRef, useState } from "react";
 import type { Widget } from "../store/projectStore";
+import { useProject } from "../store/projectStore";
 import { useTag } from "../hooks/useTag";
 import { apiBase } from "../store/runtimeTarget";
 import { registerWidget } from "./widgetRegistry";
@@ -624,7 +625,42 @@ registerWidget({ type: "numericInput",   label: "Numeric In",  defaultW: 3, defa
 registerWidget({ type: "textInput",      label: "Text In",     defaultW: 3, defaultH: 2 });
 registerWidget({ type: "historyLog",     label: "History",     defaultW: 6, defaultH: 4 });
 registerWidget({ type: "alarmBanner",    label: "Alarms",      defaultW: 6, defaultH: 3 });
-registerWidget({ type: "image",          label: "Image",       defaultW: 3, defaultH: 3 });
+registerWidget({ type: "image",          label: "Image",       defaultW: 4, defaultH: 3 });
+
+// ── Image widget ───────────────────────────────────────────────────────────
+
+function ImageWidget({ w }: { w: Widget }) {
+  const src = (w.config?.src as string | undefined) ?? "";
+  const fit = (w.config?.objectFit as string | undefined) ?? "contain";
+
+  // Resolve lib: references against the project image library
+  const libSrc = useProject(s => {
+    if (!src.startsWith("lib:")) return null;
+    const id = src.slice(4);
+    return s.project.images?.find(img => img.id === id)?.dataUrl ?? null;
+  });
+
+  const resolved = src.startsWith("lib:") ? libSrc : src || null;
+
+  if (!resolved) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-1 text-zinc-600">
+        <span className="text-2xl opacity-40">🖼</span>
+        <span className="text-[10px]">No image</span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={resolved}
+      alt={w.config?.label as string ?? ""}
+      className="w-full h-full"
+      style={{ objectFit: fit as React.CSSProperties["objectFit"] }}
+      draggable={false}
+    />
+  );
+}
 
 // ── renderer map ───────────────────────────────────────────────────────────
 
@@ -641,6 +677,7 @@ const renderers: Record<string, React.ComponentType<{ w: Widget }>> = {
   textInput:      TextInputWidget,
   historyLog:     HistoryLogWidget,
   multiState:     MultiStateWidget,
+  image:          ImageWidget,
 };
 
 export function WidgetRenderer({ w }: { w: Widget }) {

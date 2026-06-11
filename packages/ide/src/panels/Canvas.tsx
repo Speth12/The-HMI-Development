@@ -100,7 +100,7 @@ export function Canvas() {
 
   const onDragOver = (e: React.DragEvent) => {
     const types = e.dataTransfer.types;
-    if (types.includes("text/x-widget-id") || types.includes("text/x-tag-binding") || types.includes("text/x-resize"))
+    if (types.includes("text/x-widget-id") || types.includes("text/x-tag-binding") || types.includes("text/x-resize") || types.includes("text/x-image-id"))
       e.preventDefault();
   };
 
@@ -115,6 +115,18 @@ export function Canvas() {
         (w) => col >= (w.x ?? 0) && col < (w.x ?? 0) + w.w && row >= (w.y ?? 0) && row < (w.y ?? 0) + w.h,
       );
       if (target) updateWidget(activePageId, target.id, { binding: tagBinding });
+      return;
+    }
+
+    const imageId = e.dataTransfer.getData("text/x-image-id");
+    if (imageId) {
+      const img = useProject.getState().project.images?.find(i => i.id === imageId);
+      addWidget(activePageId, {
+        id: newWidgetId(),
+        type: "image",
+        x: Math.max(0, col), y: Math.max(0, row), w: 4, h: 3,
+        config: { src: `lib:${imageId}`, label: img?.name ?? "Image", objectFit: "contain" },
+      });
       return;
     }
 

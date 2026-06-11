@@ -51,6 +51,16 @@ export type Recipe = {
   entries: RecipeEntry[];
 };
 
+export type ImageAsset = {
+  id: string;
+  name: string;
+  dataUrl: string;   // base64 data URL
+  mimeType: string;
+  width: number;
+  height: number;
+  size: number;      // bytes (original file size)
+};
+
 export type Project = {
   version: string;
   name?: string;
@@ -60,6 +70,7 @@ export type Project = {
   pages: Page[];
   alarmRules?: AlarmRule[];
   recipes?: Recipe[];
+  images?: ImageAsset[];
 };
 
 const MAX_HISTORY = 50;
@@ -98,6 +109,10 @@ type State = {
   addRecipe: (recipe: Recipe) => void;
   updateRecipe: (id: string, patch: Partial<Recipe>) => void;
   removeRecipe: (id: string) => void;
+
+  importImage: (asset: ImageAsset) => void;
+  deleteImage: (id: string) => void;
+  renameImage: (id: string, name: string) => void;
 
   loadProject: (p: Project) => void;
   exportJSON: () => string;
@@ -295,6 +310,30 @@ export const useProject = create<State>((set, get) => {
         project: {
           ...s.project,
           recipes: (s.project.recipes ?? []).filter((r) => r.id !== id),
+        },
+      }));
+    },
+
+    importImage: (asset) => {
+      pushHistory();
+      set((s) => ({
+        project: { ...s.project, images: [...(s.project.images ?? []), asset] },
+      }));
+    },
+
+    deleteImage: (id) => {
+      pushHistory();
+      set((s) => ({
+        project: { ...s.project, images: (s.project.images ?? []).filter((img) => img.id !== id) },
+      }));
+    },
+
+    renameImage: (id, name) => {
+      pushHistory();
+      set((s) => ({
+        project: {
+          ...s.project,
+          images: (s.project.images ?? []).map((img) => img.id === id ? { ...img, name } : img),
         },
       }));
     },

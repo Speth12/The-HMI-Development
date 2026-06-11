@@ -1,33 +1,40 @@
 import { useState } from "react";
 import { useProject, type DatasourceType } from "../store/projectStore";
 import { AlarmBadge } from "./Alarms";
+import { ImageLibrary } from "./ImageLibrary";
 
 // ── Left panel: Project | Page tabs ──────────────────────────────────────────
 
 export function LeftPanel({ width }: { width?: number }) {
-  const [tab, setTab] = useState<"project" | "page">("project");
+  const [tab, setTab] = useState<"project" | "page" | "images">("project");
+  const imageCount = useProject(s => s.project.images?.length ?? 0);
 
   return (
     <div className="shrink-0 border-r border-zinc-800 bg-zinc-900/50 flex flex-col min-h-0" style={{ width: width ?? 260 }}>
       {/* Tab bar */}
       <div className="flex border-b border-zinc-800 shrink-0">
-        {(["project", "page"] as const).map((t) => (
+        {(["project", "page", "images"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`flex-1 py-1.5 text-[10px] uppercase tracking-wider font-medium transition-colors ${
+            className={`flex-1 py-1.5 text-[10px] uppercase tracking-wider font-medium transition-colors relative ${
               tab === t
                 ? "text-zinc-100 border-b-2 border-blue-500 -mb-px"
                 : "text-zinc-500 hover:text-zinc-300"
             }`}
           >
             {t}
+            {t === "images" && imageCount > 0 && (
+              <span className="ml-1 text-[8px] bg-zinc-700 text-zinc-300 rounded-full px-1">{imageCount}</span>
+            )}
           </button>
         ))}
       </div>
 
       <div className="flex-1 overflow-auto min-h-0">
-        {tab === "project" ? <ProjectSettings /> : <PageSettings />}
+        {tab === "project" && <ProjectSettings />}
+        {tab === "page"    && <PageSettings />}
+        {tab === "images"  && <ImageLibrary />}
       </div>
     </div>
   );
