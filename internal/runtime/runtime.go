@@ -358,23 +358,27 @@ func buildConfig(ds project.DatasourceElement) drivers.DriverConfig {
 }
 
 // tagsForDatasource returns every binding path on any widget that targets dsID.
-// Bindings are formatted "datasource_id:tag_path".
+// Bindings are formatted "datasource_id:tag_path". Includes visibleBinding paths.
 func tagsForDatasource(p *project.Project, dsID string) []string {
 	prefix := dsID + ":"
 	seen := map[string]bool{}
 	var out []string
+	addBinding := func(b string) {
+		if len(b) > len(prefix) && b[:len(prefix)] == prefix {
+			path := b[len(prefix):]
+			if !seen[path] {
+				seen[path] = true
+				out = append(out, path)
+			}
+		}
+	}
 	for _, page := range p.Pages {
 		for _, w := range page.Widgets {
-			if w.Binding == nil {
-				continue
+			if w.Binding != nil {
+				addBinding(*w.Binding)
 			}
-			b := *w.Binding
-			if len(b) > len(prefix) && b[:len(prefix)] == prefix {
-				path := b[len(prefix):]
-				if !seen[path] {
-					seen[path] = true
-					out = append(out, path)
-				}
+			if w.VisibleBinding != nil {
+				addBinding(*w.VisibleBinding)
 			}
 		}
 	}

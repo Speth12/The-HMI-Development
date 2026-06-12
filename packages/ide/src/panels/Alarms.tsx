@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useProject, type AlarmCondition, type AlarmRule, type AlarmSeverity } from "../store/projectStore";
 import { apiBase } from "../store/runtimeTarget";
+import { useClientAlarms } from "../store/alarmEngine";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -230,6 +231,8 @@ export function Alarms() {
   const { project, addAlarmRule, updateAlarmRule, removeAlarmRule } = useProject();
   const rules = project.alarmRules ?? [];
 
+  const clientAlarms = useClientAlarms();
+
   const [tab, setTab]       = useState<"live" | "history">("live");
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -263,7 +266,8 @@ export function Alarms() {
   };
 
   const editingRule = editId ? rules.find((r) => r.id === editId) : undefined;
-  const activeCount = events.filter((e) => e.active && !e.acked).length;
+  const runtimeActive = events.filter((e) => e.active && !e.acked).length;
+  const activeCount = clientAlarms.length + runtimeActive;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -337,6 +341,29 @@ export function Alarms() {
           {rules.length === 0 && !showForm && (
             <div className="text-xs text-zinc-600 italic text-center pt-4">
               No alarm rules.<br />Click <span className="font-semibold">+ rule</span> to create one.
+            </div>
+          )}
+
+          {/* Client-side alarms (evaluated from project rules + live tags) */}
+          {clientAlarms.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+                Client alarms ({clientAlarms.length})
+              </div>
+              {clientAlarms.map((a) => (
+                <div key={a.ruleId} className={`rounded border px-2 py-1.5 ${severityBg[a.severity as AlarmSeverity] ?? "bg-zinc-900/40 border-zinc-800"}`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] font-bold ${severityColor[a.severity as AlarmSeverity] ?? "text-zinc-400"}`}>
+                      ● {a.severity.toUpperCase()}
+                    </span>
+                    <span className="text-[11px] font-medium flex-1 truncate">{a.name}</span>
+                  </div>
+                  <div className="text-[10px] text-zinc-400 mt-0.5">{a.message}</div>
+                  <div className="text-[10px] text-zinc-600 font-mono">
+                    value={a.value.toFixed(2)} · {new Date(a.since).toLocaleTimeString()}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
 

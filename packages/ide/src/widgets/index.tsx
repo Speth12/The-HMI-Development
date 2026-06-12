@@ -1,8 +1,10 @@
 // Widget renderers — read, write, and trend support.
-import { useEffect, useRef, useState } from "react";
-import type { Widget } from "../store/projectStore";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import type { Widget, Dynamic } from "../store/projectStore";
 import { useProject } from "../store/projectStore";
 import { useTag } from "../hooks/useTag";
+import { useTags } from "../hooks/useTags";
 import { apiBase } from "../store/runtimeTarget";
 import { registerWidget } from "./widgetRegistry";
 
@@ -40,14 +42,78 @@ async function writeTag(binding: string, value: unknown): Promise<void> {
   }
 }
 
+// ── Keypad Modal ───────────────────────────────────────────────────────────
+
+export function KeypadModal({
+  initial,
+  label,
+  unit,
+  onConfirm,
+  onCancel,
+}: {
+  initial: number;
+  label?: string;
+  unit?: string;
+  onConfirm: (v: number) => void;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState(String(initial));
+
+  const append = (ch: string) => {
+    setDraft((d) => {
+      if (ch === "." && d.includes(".")) return d;
+      if (d === "0" && ch !== ".") return ch;
+      if (d === "-0" && ch !== ".") return "-" + ch;
+      return d + ch;
+    });
+  };
+  const backspace = () => setDraft((d) => (d.length > 1 ? d.slice(0, -1) : "0"));
+  const toggleSign = () => setDraft((d) => (d.startsWith("-") ? d.slice(1) : "-" + d));
+
+  const keys = ["7","8","9","4","5","6","1","2","3","0",".","⌫"];
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center" onClick={onCancel}>
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-4 w-56 space-y-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        {label && <div className="text-[11px] text-zinc-500 truncate">{label}</div>}
+        <div className="text-2xl font-mono text-right bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 min-h-[2.5rem]">
+          {draft}
+          {unit && <span className="text-sm text-zinc-500 ml-1">{unit}</span>}
+        </div>
+        <div className="grid grid-cols-3 gap-1.5">
+          {keys.map((k) => (
+            <button
+              key={k}
+              onClick={() => k === "⌫" ? backspace() : append(k)}
+              className="py-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 active:scale-95 text-sm font-medium transition-all"
+            >
+              {k}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-3 gap-1.5">
+          <button onClick={toggleSign} className="py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm col-span-1">+/-</button>
+          <button onClick={onCancel} className="py-2 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-sm">✕</button>
+          <button
+            onClick={() => { const n = parseFloat(draft); if (!isNaN(n)) onConfirm(n); }}
+            className="py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium"
+          >✓</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 // ── shared Frame ───────────────────────────────────────────────────────────
 
 function Frame({ w, children }: { w: Widget; children: React.ReactNode }) {
+  const label = w.config?.label as string | undefined;
   return (
     <div className="h-full w-full rounded-lg bg-zinc-900/80 border border-zinc-800 p-3 flex flex-col gap-1 select-none">
-      <div className="text-[10px] uppercase tracking-wider text-zinc-500 truncate">
-        {(w.config?.label as string) ?? w.type}
-      </div>
+      {label ? (
+        <div className="text-[10px] uppercase tracking-wider text-zinc-500 truncate shrink-0">{label}</div>
+      ) : null}
       <div className="flex-1 min-h-0">{children}</div>
     </div>
   );
@@ -176,10 +242,24 @@ function LEDWidget({ w }: { w: Widget }) {
 
 function ButtonWidget({ w }: { w: Widget }) {
   const t = useTag(w.binding);
+  const { setActivePage } = useProject();
   const label = (w.config?.label as string) ?? "Press";
+  const action = (w.config?.action as string) ?? "write";
   const momentary = (w.config?.momentary as boolean) ?? true;
   const onValue  = w.config?.onValue  ?? 1;
   const offValue = w.config?.offValue ?? 0;
+
+  if (action === "navigate") {
+    const targetPage = w.config?.navigateTo as string | undefined;
+    return (
+      <button
+        className="w-full h-full rounded-md bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-sm font-medium transition-all"
+        onClick={() => targetPage && setActivePage(targetPage)}
+      >
+        {label}
+      </button>
+    );
+  }
 
   if (momentary) {
     return (
@@ -210,50 +290,30 @@ function ButtonWidget({ w }: { w: Widget }) {
 
 function NumericInputWidget({ w }: { w: Widget }) {
   const t = useTag(w.binding);
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const startEdit = () => {
-    setDraft(t.value != null ? String(t.value) : "");
-    setEditing(true);
-    setTimeout(() => inputRef.current?.select(), 0);
-  };
-
-  const commit = () => {
-    const n = parseFloat(draft);
-    if (!isNaN(n) && w.binding) writeTag(w.binding, n);
-    setEditing(false);
-  };
+  const [open, setOpen] = useState(false);
+  const cur = typeof t.value === "number" ? t.value : 0;
 
   return (
     <div className="flex flex-col h-full justify-center">
-      {editing ? (
-        <input
-          ref={inputRef}
-          autoFocus
-          type="number"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commit();
-            if (e.key === "Escape") setEditing(false);
-          }}
-          className="text-2xl font-mono bg-zinc-800 border border-blue-500 rounded px-2 py-1 w-full outline-none"
-        />
-      ) : (
-        <div
-          onClick={startEdit}
-          className="text-3xl font-semibold tabular-nums cursor-text hover:bg-zinc-800 rounded px-1 transition-colors"
-        >
-          {fmt(t.value)}
-          {w.config?.unit ? <span className="text-base text-zinc-500 ml-1">{w.config.unit as string}</span> : null}
-        </div>
-      )}
-      <div className={`text-[10px] mt-1 ${qualityColor[t.quality] ?? "text-zinc-500"}`}>
-        {editing ? "enter value → confirm" : t.quality}
+      <div
+        onClick={() => setOpen(true)}
+        className="text-3xl font-semibold tabular-nums cursor-pointer hover:bg-zinc-800 rounded px-1 transition-colors select-none"
+      >
+        {fmt(t.value)}
+        {w.config?.unit ? <span className="text-base text-zinc-500 ml-1">{w.config.unit as string}</span> : null}
       </div>
+      <div className={`text-[10px] mt-1 ${qualityColor[t.quality] ?? "text-zinc-500"}`}>
+        tap to enter value
+      </div>
+      {open && (
+        <KeypadModal
+          initial={cur}
+          label={w.config?.label as string | undefined}
+          unit={w.config?.unit as string | undefined}
+          onConfirm={(n) => { if (w.binding) writeTag(w.binding, n); setOpen(false); }}
+          onCancel={() => setOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -427,7 +487,32 @@ const TREND_WINDOWS = [
 function TrendWidget({ w }: { w: Widget }) {
   const cfgDuration = (w.config?.duration as number) ?? 300;
   const [windowSec, setWindowSec] = useState(cfgDuration);
+  const [panOffsetMs, setPanOffsetMs] = useState(0); // negative = look into the past
   const duration = windowSec * 1000;
+
+  // Pan via mouse/touch drag
+  const svgRef = useRef<SVGSVGElement>(null);
+  const dragStartX = useRef<number | null>(null);
+  const dragStartPan = useRef(0);
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    dragStartX.current = e.clientX;
+    dragStartPan.current = panOffsetMs;
+    (e.target as Element).setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (dragStartX.current === null) return;
+    const svgW = svgRef.current?.getBoundingClientRect().width ?? 1;
+    const msDelta = ((e.clientX - dragStartX.current) / svgW) * duration;
+    setPanOffsetMs(Math.min(0, dragStartPan.current + msDelta));
+  };
+  const onPointerUp = () => { dragStartX.current = null; };
+  const onWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const idx = TREND_WINDOWS.findIndex((tw) => tw.sec === windowSec);
+    if (e.deltaY < 0 && idx > 0) setWindowSec(TREND_WINDOWS[idx - 1]!.sec);
+    if (e.deltaY > 0 && idx < TREND_WINDOWS.length - 1) setWindowSec(TREND_WINDOWS[idx + 1]!.sec);
+  };
 
   // Build series list: config.tags[] for multi-series, or fall back to w.binding.
   const cfgTags = w.config?.tags as TrendSeries[] | undefined;
@@ -454,15 +539,17 @@ function TrendWidget({ w }: { w: Widget }) {
   const vRange = vMax - vMin || 1;
   const midVal = (vMin + vMax) / 2;
 
-  // Shared time window: most recent point across all series.
-  const tMax = flat.length ? Math.max(...flat.map((p) => p.ts)) : Date.now();
+  // Shared time window: most recent point across all series, adjusted for pan.
+  const liveMax = flat.length ? Math.max(...flat.map((p) => p.ts)) : Date.now();
+  const tMax = liveMax + panOffsetMs;
   const tMin = tMax - duration;
   const tSpan = tMax - tMin || 1;
+  const isPanned = panOffsetMs < -1000;
 
   return (
     <div className="flex flex-col h-full">
       {/* Time-window picker */}
-      <div className="flex gap-1 shrink-0 mb-0.5">
+      <div className="flex gap-1 shrink-0 mb-0.5 items-center">
         {TREND_WINDOWS.map((tw) => (
           <button
             key={tw.sec}
@@ -476,6 +563,12 @@ function TrendWidget({ w }: { w: Widget }) {
             {tw.label}
           </button>
         ))}
+        {isPanned && (
+          <button
+            onClick={() => setPanOffsetMs(0)}
+            className="ml-auto text-[9px] px-1.5 py-0.5 rounded bg-amber-700 text-amber-200 hover:bg-amber-600"
+          >live ▶</button>
+        )}
       </div>
       {/* Chart area with Y-axis */}
       <div className="flex flex-1 min-h-0 gap-1">
@@ -486,17 +579,28 @@ function TrendWidget({ w }: { w: Widget }) {
           <span>{vMin.toFixed(0)}</span>
         </div>
         {/* Plot */}
-        <svg className="flex-1 overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
+        <svg
+          ref={svgRef}
+          className="flex-1 overflow-visible cursor-ew-resize"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerLeave={onPointerUp}
+          onWheel={onWheel}
+        >
           {[0, 25, 50, 75, 100].map((y) => (
             <line key={y} x1="0" y1={y} x2="100" y2={y} stroke="#27272a" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
           ))}
           {allPts.map((pts, i) => {
             const color = series[i]?.color ?? SERIES_COLORS[i % SERIES_COLORS.length]!;
-            const last = pts.at(-1);
+            const visible = pts.filter((p) => p.ts >= tMin && p.ts <= tMax);
+            const last = visible.at(-1);
             return (
               <g key={i}>
                 <polyline
-                  points={pts.filter((p) => p.ts >= tMin).map((p) =>
+                  points={visible.map((p) =>
                     `${(((p.ts - tMin) / tSpan) * 100).toFixed(2)},${(100 - ((p.v - vMin) / vRange) * 100).toFixed(2)}`
                   ).join(" ")}
                   fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round"
@@ -609,6 +713,107 @@ function MultiStateWidget({ w }: { w: Widget }) {
   );
 }
 
+// ── Faceplate widget ──────────────────────────────────────────────────────
+
+function FaceplateWidget({ w }: { w: Widget }) {
+  const project = useProject((s) => s.project);
+  const fpId = w.config?.faceplateId as string | undefined;
+  const params = (w.config?.params ?? {}) as Record<string, string>;
+
+  const fp = project.faceplates?.find((f) => f.id === fpId);
+
+  if (!fp) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-1 text-purple-400/60 border border-purple-800/40 rounded-lg">
+        <span className="text-xs font-mono">faceplate</span>
+        <span className="text-[10px] text-zinc-600">{fpId ?? "no id"}</span>
+      </div>
+    );
+  }
+
+  function rewriteBinding(binding: string | undefined): string | undefined {
+    if (!binding) return binding;
+    return binding.replace(/\{(\w+)\}/g, (_, key) => params[key] ?? `{${key}}`);
+  }
+
+  return (
+    <div className="h-full relative border border-purple-700/50 rounded-lg overflow-hidden">
+      <div className="absolute top-0 left-0 right-0 z-10 px-2 py-0.5 bg-purple-900/40 text-[9px] text-purple-300 font-medium tracking-wider truncate">
+        FP: {fp.name}
+      </div>
+      <div className="absolute inset-0 pt-5">
+        {fp.widgets.map((fw) => {
+          const resolved: Widget = {
+            ...fw,
+            id: fw.localId,
+            binding: rewriteBinding(fw.binding),
+          };
+          const Renderer = renderers[fw.type];
+          if (!Renderer) return null;
+          const left   = `${((fw.x / (w.w || 1)) * 100).toFixed(1)}%`;
+          const top    = `${((fw.y / (w.h || 1)) * 100).toFixed(1)}%`;
+          const width  = `${((fw.w / (w.w || 1)) * 100).toFixed(1)}%`;
+          const height = `${((fw.h / (w.h || 1)) * 100).toFixed(1)}%`;
+          return (
+            <div key={fw.localId} className="absolute" style={{ left, top, width, height }}>
+              <Renderer w={resolved} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Table widget ───────────────────────────────────────────────────────────
+
+type TableRow = { label: string; binding: string; unit?: string };
+
+function TableWidget({ w }: { w: Widget }) {
+  const rows: TableRow[] = (w.config?.rows as TableRow[]) ?? [];
+  const bindings = useMemo(() => rows.map((r) => r.binding).filter(Boolean), [rows]);
+  const tags = useTags(bindings);
+  const showQuality = w.config?.showQuality as boolean | undefined;
+
+  return (
+    <div className="h-full overflow-auto">
+      <table className="w-full text-[11px] border-collapse">
+        <thead>
+          <tr className="border-b border-zinc-700">
+            <th className="text-left text-zinc-500 font-medium py-0.5 pr-2 sticky top-0 bg-zinc-900">Tag</th>
+            <th className="text-right text-zinc-500 font-medium py-0.5 pl-2 sticky top-0 bg-zinc-900">Value</th>
+            {showQuality && <th className="text-right text-zinc-500 font-medium py-0.5 pl-2 sticky top-0 bg-zinc-900">Q</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 && (
+            <tr><td colSpan={3} className="text-zinc-600 italic py-2 text-center text-[10px]">No rows configured</td></tr>
+          )}
+          {rows.map((row, i) => {
+            const t = tags[row.binding];
+            return (
+              <tr key={i} className="border-b border-zinc-800/60 hover:bg-zinc-800/30">
+                <td className="py-1 pr-2 text-zinc-400 truncate max-w-[120px]" title={row.binding}>
+                  {row.label || row.binding}
+                </td>
+                <td className="py-1 pl-2 text-right font-mono text-zinc-100 tabular-nums">
+                  {fmt(t?.value)}
+                  {row.unit && <span className="text-zinc-500 ml-1 text-[9px]">{row.unit}</span>}
+                </td>
+                {showQuality && (
+                  <td className={`py-1 pl-2 text-right text-[9px] ${qualityColor[t?.quality ?? ""] ?? "text-zinc-600"}`}>
+                    {t?.quality ?? "—"}
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ── registrations ─────────────────────────────────────────────────────────
 // Palette metadata. PropertiesPanel is registered separately in Properties.tsx.
 
@@ -626,6 +831,8 @@ registerWidget({ type: "textInput",      label: "Text In",     defaultW: 3, defa
 registerWidget({ type: "historyLog",     label: "History",     defaultW: 6, defaultH: 4 });
 registerWidget({ type: "alarmBanner",    label: "Alarms",      defaultW: 6, defaultH: 3 });
 registerWidget({ type: "image",          label: "Image",       defaultW: 4, defaultH: 3 });
+registerWidget({ type: "faceplate",      label: "Faceplate",   defaultW: 4, defaultH: 4 });
+registerWidget({ type: "table",          label: "Table",       defaultW: 4, defaultH: 4 });
 
 // ── Image widget ───────────────────────────────────────────────────────────
 
@@ -662,6 +869,69 @@ function ImageWidget({ w }: { w: Widget }) {
   );
 }
 
+// ── Symbol widget ──────────────────────────────────────────────────────────
+
+import { SYMBOLS } from "../data/symbols";
+import { SymbolSVG } from "../panels/SymbolLibrary";
+
+function SymbolWidget({ w }: { w: Widget }) {
+  const stroke = (w.config?.stroke as string | undefined) ?? "#d4d4d8";
+  const sym = SYMBOLS.find(s => s.id === w.config?.symbolId);
+  if (!sym) {
+    return (
+      <div className="flex items-center justify-center h-full text-zinc-600 text-xs">?sym</div>
+    );
+  }
+  return (
+    <div className="flex flex-col items-center justify-center w-full h-full p-1 gap-0.5">
+      <div className="flex-1 min-h-0 flex items-center justify-center w-full">
+        <SymbolSVG svg={sym.svg} stroke={stroke} size={0} />
+      </div>
+      {(w.config?.label as string | undefined) && (
+        <span className="text-[9px] text-zinc-400 truncate max-w-full shrink-0">
+          {w.config!.label as string}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ── alarm banner widget ────────────────────────────────────────────────────
+
+import { useClientAlarms } from "../store/alarmEngine";
+
+function AlarmBannerWidget({ w }: { w: Widget }) {
+  const clientAlarms = useClientAlarms();
+  const maxRows = (w.config?.maxRows as number) ?? 5;
+
+  const sevColor: Record<string, string> = {
+    critical: "text-red-400 border-red-900/60",
+    warning:  "text-amber-400 border-amber-900/60",
+    info:     "text-blue-400 border-blue-900/60",
+  };
+
+  const active = clientAlarms.slice(0, maxRows);
+
+  return (
+    <div className="h-full flex flex-col gap-0.5 overflow-hidden">
+      {active.length === 0 ? (
+        <div className="flex items-center justify-center h-full text-[11px] text-emerald-500/70 gap-1">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+          No active alarms
+        </div>
+      ) : (
+        active.map((a) => (
+          <div key={a.ruleId} className={`flex items-center gap-2 text-[10px] border-b px-1 py-0.5 ${sevColor[a.severity] ?? "text-zinc-400 border-zinc-800"}`}>
+            <span className="uppercase font-bold shrink-0 w-14 truncate">{a.severity}</span>
+            <span className="flex-1 truncate">{a.message}</span>
+            <span className="text-zinc-600 shrink-0">{new Date(a.since).toLocaleTimeString()}</span>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
 // ── renderer map ───────────────────────────────────────────────────────────
 
 const renderers: Record<string, React.ComponentType<{ w: Widget }>> = {
@@ -678,15 +948,139 @@ const renderers: Record<string, React.ComponentType<{ w: Widget }>> = {
   historyLog:     HistoryLogWidget,
   multiState:     MultiStateWidget,
   image:          ImageWidget,
+  symbol:         SymbolWidget,
+  alarmBanner:    AlarmBannerWidget,
+  faceplate:      FaceplateWidget,
+  table:          TableWidget,
 };
+
+function VisibilityGate({ w, children }: { w: Widget; children: React.ReactNode }) {
+  const t = useTag(w.visibleBinding);
+  if (w.visibleBinding && !t.value) return null;
+  return <>{children}</>;
+}
+
+// ── Dynamics applicator ────────────────────────────────────────────────────
+
+async function execDynAction(d: Dynamic, tagVals: Record<string, { value: unknown }>, setActivePage: (id: string) => void) {
+  if (d.actionType === "navigate" && d.pageId) {
+    setActivePage(d.pageId);
+    return;
+  }
+  if (d.actionType === "openUrl" && d.url) {
+    window.open(d.url, "_blank", "noopener");
+    return;
+  }
+  const binding = d.writeTo;
+  if (!binding) return;
+  const sep = binding.indexOf(":");
+  if (sep < 0) return;
+  let value: unknown;
+  if (d.actionType === "toggleValue") {
+    value = tagVals[binding]?.value ? 0 : 1;
+  } else if (d.actionType === "incrementValue") {
+    const cur = typeof tagVals[binding]?.value === "number" ? tagVals[binding].value as number : 0;
+    value = cur + (d.step ?? 1);
+  } else {
+    value = d.writeValue;
+  }
+  await fetch(`${apiBase}/api/v1/tag/${encodeURIComponent(binding.slice(sep + 1))}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ datasource: binding.slice(0, sep), value }),
+  }).catch(() => {});
+}
+
+function DynamicsApplicator({ w, children }: { w: Widget; children: React.ReactNode }) {
+  const dynamics = w.dynamics ?? [];
+  const { setActivePage } = useProject();
+
+  const bindings = useMemo(() =>
+    [...new Set(dynamics.flatMap((d) => [d.binding, d.writeTo].filter(Boolean) as string[]))],
+    [dynamics]
+  );
+  const tagVals = useTags(bindings);
+
+  // Blink state
+  const [blinkVisible, setBlinkVisible] = useState(true);
+  const blinkDyn = dynamics.find((d) => d.kind === "blink" && d.binding && !!tagVals[d.binding]?.value);
+  useEffect(() => {
+    if (!blinkDyn) { setBlinkVisible(true); return; }
+    const half = (blinkDyn.blinkPeriodMs ?? 800) / 2;
+    const iv = setInterval(() => setBlinkVisible((v) => !v), half);
+    return () => clearInterval(iv);
+  }, [blinkDyn?.id, blinkDyn?.blinkPeriodMs, !!blinkDyn]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Derive property dynamic values
+  let hidden = false;
+  let rotationDeg = 0;
+  let disabled = false;
+  let ringColor: string | undefined;
+
+  for (const d of dynamics) {
+    const rawVal = d.binding ? tagVals[d.binding]?.value : undefined;
+    const truthy = !!rawVal;
+
+    if (d.kind === "visibility" && d.binding && !truthy) { hidden = true; break; }
+    if (d.kind === "disable" && d.binding && truthy) disabled = true;
+    if (d.kind === "colorFill" && d.binding) {
+      ringColor = truthy ? (d.trueColor ?? "#22c55e") : (d.falseColor ?? "#3f3f46");
+    }
+    if (d.kind === "rotation" && d.binding) {
+      const num = typeof rawVal === "number" ? rawVal : 0;
+      const t = Math.max(0, Math.min(1, (num - (d.minValue ?? 0)) / ((d.maxValue ?? 100) - (d.minValue ?? 0))));
+      rotationDeg = (d.minAngle ?? -90) + t * ((d.maxAngle ?? 90) - (d.minAngle ?? -90));
+    }
+  }
+
+  if (hidden) return null;
+
+  const hasClick    = dynamics.some((d) => d.kind === "onClick");
+  const hasPressed  = dynamics.some((d) => d.kind === "onPressed");
+  const hasReleased = dynamics.some((d) => d.kind === "onReleased");
+
+  const handleClick    = useCallback(() => dynamics.filter((d) => d.kind === "onClick").forEach((d) => execDynAction(d, tagVals, setActivePage)), [dynamics, tagVals, setActivePage]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handlePressed  = useCallback(() => dynamics.filter((d) => d.kind === "onPressed").forEach((d) => execDynAction(d, tagVals, setActivePage)), [dynamics, tagVals, setActivePage]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleReleased = useCallback(() => dynamics.filter((d) => d.kind === "onReleased").forEach((d) => execDynAction(d, tagVals, setActivePage)), [dynamics, tagVals, setActivePage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div
+      className="relative w-full h-full"
+      style={{
+        transform: rotationDeg ? `rotate(${rotationDeg.toFixed(1)}deg)` : undefined,
+        opacity: blinkDyn && !blinkVisible ? 0 : 1,
+        pointerEvents: disabled ? "none" : undefined,
+        cursor: (hasClick || hasPressed) ? "pointer" : undefined,
+        outline: ringColor ? `2px solid ${ringColor}` : undefined,
+        outlineOffset: "-2px",
+        borderRadius: "0.5rem",
+        transition: "opacity 0.05s, outline-color 0.2s",
+      }}
+      onClick={hasClick ? handleClick : undefined}
+      onPointerDown={hasPressed ? handlePressed : undefined}
+      onPointerUp={hasReleased ? handleReleased : undefined}
+    >
+      {disabled && (
+        <div className="absolute inset-0 z-10 bg-zinc-950/50 rounded-lg pointer-events-none" />
+      )}
+      {children}
+    </div>
+  );
+}
 
 export function WidgetRenderer({ w }: { w: Widget }) {
   const R = renderers[w.type] ?? (() => (
     <div className="flex items-center justify-center h-full text-zinc-500 text-xs">{w.type}</div>
   ));
-  return (
+  const hasDynamics = (w.dynamics?.length ?? 0) > 0;
+  const inner = (
     <Frame w={w}>
       <R w={w} />
     </Frame>
+  );
+  return (
+    <VisibilityGate w={w}>
+      {hasDynamics ? <DynamicsApplicator w={w}>{inner}</DynamicsApplicator> : inner}
+    </VisibilityGate>
   );
 }

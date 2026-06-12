@@ -170,5 +170,44 @@ func fanIn(ctx context.Context, in <-chan tagstore.TagUpdate, out chan<- tagstor
 	}
 }
 
+// handleEventsWS streams eventbus events to connected HMI screens.
+// Used by the preview/runtime viewer to receive navigate_page commands and
+// other runtime-to-client broadcasts without polling.
+func (s *Server) handleEventsWS(w http.ResponseWriter, r *http.Request) {
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+	if err != nil {
+		log.Printf("[WS/events] accept: %v", err)
+		return
+	}
+	defer conn.Close(websocket.StatusInternalError, "shutting down")
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	log.Printf("[WS/events] client connected from %s", r.RemoteAddr)
+
+	ch, unsub := s.rt.Events.SubscribeAll()
+	defer unsub()
+
+	for {
+		select {
+		case <-ctx.Done():
+			conn.Close(websocket.StatusNormalClosure, "bye")
+			return
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			wctx, wcancel := context.WithTimeout(ctx, 2*time.Second)
+			err := wsjson.Write(wctx, conn, ev)
+			wcancel()
+			if err != nil {
+				log.Printf("[WS/events] write: %v", err)
+				return
+			}
+		}
+	}
+}
+
 // for tests — verify the JSON shapes are what we promise
 var _ = json.Marshal

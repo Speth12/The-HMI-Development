@@ -1,21 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
-import { Alarms } from "./panels/Alarms";
 import { Canvas } from "./panels/Canvas";
 import { DemoModal } from "./panels/Demo";
 import { Header } from "./panels/Header";
+import { ImageLibrary } from "./panels/ImageLibrary";
 import { LeftPanel } from "./panels/LeftPanel";
-import { Palette } from "./panels/Palette";
+import { Palette, WidgetPalette } from "./panels/Palette";
 import { Properties } from "./panels/Properties";
-import { Recipes } from "./panels/Recipes";
-import { TagBrowser } from "./panels/TagBrowser";
 import { StatusBar } from "./panels/StatusBar";
+import { SymbolLibrary } from "./panels/SymbolLibrary";
+import { PreviewMode } from "./panels/PreviewMode";
 import { useProject } from "./store/projectStore";
 import { useShallow } from "zustand/react/shallow";
+
+type RightTab = "props" | "widgets" | "images" | "symbols";
 
 const SHORTCUTS = [
   { keys: "Del / Backspace", desc: "Delete selected widget" },
   { keys: "Esc",             desc: "Deselect" },
+  { keys: "F5",              desc: "Enter full-screen preview" },
   { keys: "Ctrl+Z",          desc: "Undo" },
   { keys: "Ctrl+Y / ⇧Z",    desc: "Redo" },
   { keys: "Ctrl+S",          desc: "Save project to file" },
@@ -86,10 +89,11 @@ export function App() {
   const [showHelp, setShowHelp]     = useState(false);
   const [showDemo, setShowDemo]     = useState(false);
   const [showJSON, setShowJSON]     = useState(false);
-  const [rightTab, setRightTab]     = useState<"tags" | "properties" | "alarms" | "recipes">("tags");
+  const [preview,  setPreview]      = useState(false);
   const [rightOpen, setRightOpen]   = useState(true);
-  const [leftW, setLeftW]           = useState(260);
-  const [rightW, setRightW]         = useState(280);
+  const [rightTab, setRightTab]     = useState<RightTab>("props");
+  const [leftW, setLeftW]           = useState(280);
+  const [rightW, setRightW]         = useState(300);
 
   const dragLeft  = useDrag((dx) => setLeftW((w) => Math.max(160, Math.min(480, w + dx))));
   const dragRight = useDrag((dx) => setRightW((w) => Math.max(160, Math.min(480, w - dx))));
@@ -104,7 +108,15 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (selectedWidgetId) { setRightTab("properties"); setRightOpen(true); }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "F5") { e.preventDefault(); setPreview(true); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => {
+    if (selectedWidgetId) setRightOpen(true);
   }, [selectedWidgetId]);
 
   return (
@@ -116,10 +128,11 @@ export function App() {
         onDemo={() => setShowDemo(true)}
         showJSON={showJSON}
         onToggleJSON={() => setShowJSON((v) => !v)}
+        onPreview={() => setPreview(true)}
       />
 
       {/* ── Body: left | center | right ──────────────────────────────── */}
-      <div className="flex-1 flex min-h-0">
+      <div className="flex-1 flex min-h-0 overflow-hidden">
 
         {/* Left: Project & Page settings */}
         <LeftPanel width={leftW} />
@@ -144,51 +157,43 @@ export function App() {
           />
         )}
 
-        {/* Right: Tags | Properties — collapsible */}
+        {/* Right: Props / Images / Symbols — collapsible */}
         {rightOpen ? (
           <div className="shrink-0 border-l border-zinc-800 bg-zinc-900/50 flex flex-col min-h-0" style={{ width: rightW }}>
+            {/* Tab bar */}
             <div className="flex items-center border-b border-zinc-800 shrink-0">
-              {(["tags", "properties", "alarms", "recipes"] as const).map((t) => (
+              {(["props", "widgets", "images", "symbols"] as RightTab[]).map((t) => (
                 <button
                   key={t}
                   onClick={() => setRightTab(t)}
-                  className={`flex-1 py-1.5 text-[10px] uppercase tracking-wider font-medium transition-colors ${
+                  className={`flex-1 text-[9px] uppercase tracking-wider py-1.5 font-medium transition-colors ${
                     rightTab === t
-                      ? "text-zinc-100 border-b-2 border-blue-500 -mb-px"
+                      ? "text-zinc-200 border-b-2 border-blue-500"
                       : "text-zinc-500 hover:text-zinc-300"
                   }`}
-                >
-                  {t}
-                </button>
+                >{{ props: "Props", widgets: "Widgets", images: "Images", symbols: "Symbols" }[t]}</button>
               ))}
               <button
                 onClick={() => setRightOpen(false)}
-                className="px-2 text-zinc-600 hover:text-zinc-300 text-base leading-none"
+                className="px-2 text-zinc-600 hover:text-zinc-300 text-base leading-none shrink-0"
                 title="Collapse panel"
-              >
-                ›
-              </button>
+              >›</button>
             </div>
             <div className="flex-1 overflow-auto min-h-0">
-              {rightTab === "tags"       && <TagBrowser />}
-              {rightTab === "properties" && <Properties />}
-              {rightTab === "alarms"     && <Alarms />}
-              {rightTab === "recipes"    && <Recipes />}
+              {rightTab === "props"   && <Properties />}
+              {rightTab === "widgets" && <WidgetPalette />}
+              {rightTab === "images"  && <ImageLibrary />}
+              {rightTab === "symbols" && <SymbolLibrary />}
             </div>
           </div>
         ) : (
-          <div className="w-7 shrink-0 border-l border-zinc-800 bg-zinc-900/50 flex flex-col items-center pt-2 gap-3">
-            {(["tags", "properties", "alarms", "recipes"] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => { setRightOpen(true); setRightTab(t); }}
-                className="text-zinc-600 hover:text-zinc-300 text-[9px] uppercase tracking-widest"
-                style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
-                title={t}
-              >
-                {t === "properties" ? "Props" : t.slice(0, 5)}
-              </button>
-            ))}
+          <div className="w-7 shrink-0 border-l border-zinc-800 bg-zinc-900/50 flex flex-col items-center pt-2">
+            <button
+              onClick={() => setRightOpen(true)}
+              className="text-zinc-600 hover:text-zinc-300 text-[9px] uppercase tracking-widest"
+              style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+              title="Properties"
+            >Props</button>
           </div>
         )}
       </div>
@@ -196,6 +201,7 @@ export function App() {
       <StatusBar />
       {showHelp && <ShortcutModal onClose={() => setShowHelp(false)} />}
       {showDemo && <DemoModal onClose={() => setShowDemo(false)} />}
+      {preview  && <PreviewMode onExit={() => setPreview(false)} />}
     </div>
   );
 }

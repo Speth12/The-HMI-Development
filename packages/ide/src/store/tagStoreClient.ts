@@ -3,6 +3,7 @@
 // The WS URL follows the active runtime target (local dev or remote PLC).
 
 import { wsUrl } from "./runtimeTarget";
+import { virtualTagStore } from "./virtualTagStore";
 
 export type TagState = {
   value: unknown;
@@ -25,6 +26,7 @@ class Client {
 
   /** Subscribe a listener. Returns an unsubscribe function. */
   subscribe(path: string, fn: Listener): () => void {
+    if (virtualTagStore.isVirtual(path)) return virtualTagStore.subscribe(path, fn);
     let set = this.listeners.get(path);
     const isFirst = !set;
     if (!set) {
@@ -52,7 +54,14 @@ class Client {
 
   /** Get the cached value (synchronous read). */
   get(path: string): TagState | undefined {
+    if (virtualTagStore.isVirtual(path)) return virtualTagStore.get(path);
     return this.cache.get(path);
+  }
+
+  /** Write a value. Virtual tags update in-memory; real tags send over WS. */
+  write(path: string, value: unknown): void {
+    if (virtualTagStore.isVirtual(path)) { virtualTagStore.set(path, value); return; }
+    this.send({ write: [{ path, value }] } as unknown as Outgoing);
   }
 
   /** Returns true if the WebSocket is currently open. */

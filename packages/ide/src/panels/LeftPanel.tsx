@@ -1,50 +1,231 @@
-import { useState } from "react";
-import { useProject, type DatasourceType } from "../store/projectStore";
-import { AlarmBadge } from "./Alarms";
-import { ImageLibrary } from "./ImageLibrary";
+import { useState, useEffect, useRef } from "react";
+import { useProject, type DatasourceType, type CanvasResolution, type CanvasSnap } from "../store/projectStore";
+import { SYMBOL_PACKS, SYMBOLS } from "../data/symbols";
+import { Alarms, AlarmBadge } from "./Alarms";
+import { Recipes } from "./Recipes";
+import { Users } from "./Users";
+import { TagBrowser, TagScannerModal } from "./TagBrowser";
+import { generateStandaloneHtml } from "../store/exportHtml";
+import { AuditTrail } from "./AuditTrail";
+import { UDTs } from "./UDTs";
+import { AssetModel } from "./AssetModel";
+import { Faceplates } from "./Faceplates";
+import { MCPModal } from "./MCPModal";
+import { downloadGitFormat, importGitFormat } from "../store/gitFormat";
+import { apiBase } from "../store/runtimeTarget";
 
-// ── Left panel: Project | Page tabs ──────────────────────────────────────────
+type LeftTab = "project" | "page" | "tags" | "users" | "alarms" | "recipes" | "audit" | "udts" | "assets" | "faceplates";
+
+// ── Left panel: Project | Page | Tags | Library tabs ─────────────────────────
 
 export function LeftPanel({ width }: { width?: number }) {
-  const [tab, setTab] = useState<"project" | "page" | "images">("project");
-  const imageCount = useProject(s => s.project.images?.length ?? 0);
+  const [tab, setTab] = useState<LeftTab>("project");
+  const [showMCP, setShowMCP] = useState(false);
+
+  const topTabs: { id: LeftTab; label: string }[] = [
+    { id: "project",   label: "Project"  },
+    { id: "page",      label: "Page"     },
+    { id: "tags",      label: "Tags"     },
+    { id: "udts",      label: "UDTs"     },
+    { id: "assets",    label: "Assets"   },
+    { id: "faceplates",label: "FP"       },
+  ];
+
+  const bottomTabs: { id: LeftTab; label: string }[] = [
+    { id: "users",   label: "Users"   },
+    { id: "alarms",  label: "Alarms"  },
+    { id: "recipes", label: "Recipes" },
+    { id: "audit",   label: "Audit"   },
+  ];
 
   return (
-    <div className="shrink-0 border-r border-zinc-800 bg-zinc-900/50 flex flex-col min-h-0" style={{ width: width ?? 260 }}>
-      {/* Tab bar */}
-      <div className="flex border-b border-zinc-800 shrink-0">
-        {(["project", "page", "images"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`flex-1 py-1.5 text-[10px] uppercase tracking-wider font-medium transition-colors relative ${
-              tab === t
-                ? "text-zinc-100 border-b-2 border-blue-500 -mb-px"
-                : "text-zinc-500 hover:text-zinc-300"
-            }`}
-          >
-            {t}
-            {t === "images" && imageCount > 0 && (
-              <span className="ml-1 text-[8px] bg-zinc-700 text-zinc-300 rounded-full px-1">{imageCount}</span>
-            )}
-          </button>
-        ))}
+    <div className="shrink-0 border-r border-zinc-800 bg-zinc-900/50 flex flex-col min-h-0" style={{ width: width ?? 280 }}>
+      {/* Tab bar — scrollable top row */}
+      <div className="border-b border-zinc-800 shrink-0">
+        <div className="flex overflow-x-auto scrollbar-none">
+          {topTabs.map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              className={`shrink-0 px-3 py-1.5 text-[10px] uppercase tracking-wider font-medium transition-colors whitespace-nowrap ${
+                tab === id
+                  ? "text-zinc-100 border-b-2 border-blue-500 -mb-px"
+                  : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="flex border-t border-zinc-800/60">
+          {bottomTabs.map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              className={`flex-1 py-1 text-[10px] uppercase tracking-wider font-medium transition-colors relative ${
+                tab === id
+                  ? "text-zinc-100 border-b-2 border-blue-500 -mb-px"
+                  : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              {label}
+              {id === "alarms" && <AlarmBadgeInline />}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto min-h-0">
-        {tab === "project" && <ProjectSettings />}
-        {tab === "page"    && <PageSettings />}
-        {tab === "images"  && <ImageLibrary />}
+        {tab === "project"    && <ProjectSettings onShowMCP={() => setShowMCP(true)} />}
+        {tab === "page"       && <PageSettings />}
+        {tab === "tags"       && <TagBrowser />}
+        {tab === "users"      && <Users />}
+        {tab === "alarms"     && <Alarms />}
+        {tab === "recipes"    && <Recipes />}
+        {tab === "audit"      && <AuditTrail />}
+        {tab === "udts"       && <UDTs />}
+        {tab === "assets"     && <AssetModel />}
+        {tab === "faceplates" && <Faceplates />}
+      </div>
+
+      {showMCP && <MCPModal onClose={() => setShowMCP(false)} />}
+    </div>
+  );
+}
+
+function AlarmBadgeInline() {
+  return <span className="inline-block ml-0.5"><AlarmBadge /></span>;
+}
+
+// ── Project Settings ──────────────────────────────────────────────────────────
+
+// ── Runtime deploy / import ───────────────────────────────────────────────
+
+type DeployState = "idle" | "busy" | "ok" | "err";
+type DSStatus = "connected" | "disconnected" | "unknown";
+
+function useDeployToRuntime(exportJSON: () => string) {
+  const [state, setState] = useState<DeployState>("idle");
+  const [msg, setMsg] = useState("");
+  const [showLogin, setShowLogin] = useState(false);
+  const jwtRef = useRef<string>("");
+
+  const deploy = async () => {
+    if (!jwtRef.current) { setShowLogin(true); return; }
+    setState("busy"); setMsg("");
+    try {
+      const r = await fetch(`${apiBase}/api/v1/project`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwtRef.current}` },
+        body: exportJSON(),
+      });
+      if (r.status === 401) { jwtRef.current = ""; setShowLogin(true); setState("idle"); return; }
+      if (!r.ok) throw new Error(await r.text());
+      setState("ok"); setMsg("Deployed");
+    } catch (e) { setState("err"); setMsg((e as Error).message); }
+    setTimeout(() => setState("idle"), 3000);
+  };
+
+  return { state, msg, showLogin, setShowLogin, jwtRef, deploy };
+}
+
+function RuntimeLoginModal({ onClose, onLogin }: { onClose: () => void; onLogin: (jwt: string) => void }) {
+  const [user, setUser] = useState("admin");
+  const [pass, setPass] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true); setErr("");
+    try {
+      const r = await fetch(`${apiBase}/api/v1/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: user, password: pass }),
+      });
+      if (!r.ok) throw new Error("Invalid credentials");
+      const data = await r.json() as { token: string };
+      onLogin(data.token);
+      onClose();
+    } catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const inp = "w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-zinc-500";
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-5 w-72 space-y-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="text-sm font-semibold">Runtime Login</div>
+        <div className="text-[11px] text-zinc-500 font-mono truncate">{apiBase || "(local)"}</div>
+        <label className="block text-[11px] text-zinc-400">Username<input value={user} onChange={(e) => setUser(e.target.value)} className={`mt-0.5 ${inp}`} /></label>
+        <label className="block text-[11px] text-zinc-400">Password<input type="password" value={pass} onChange={(e) => setPass(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} className={`mt-0.5 ${inp}`} /></label>
+        {err && <div className="text-[11px] text-red-400">{err}</div>}
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-zinc-700 hover:bg-zinc-600">Cancel</button>
+          <button onClick={submit} disabled={busy} className="flex-1 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-500 font-medium disabled:opacity-50">{busy ? "…" : "Login"}</button>
+        </div>
       </div>
     </div>
   );
 }
 
-// ── Project Settings ──────────────────────────────────────────────────────────
+function useDSStatus(dsIds: string[]) {
+  const [statuses, setStatuses] = useState<Record<string, DSStatus>>({});
 
-function ProjectSettings() {
+  useEffect(() => {
+    if (!dsIds.length || !apiBase) return;
+    const poll = async () => {
+      const next: Record<string, DSStatus> = {};
+      await Promise.all(dsIds.map(async (id) => {
+        try {
+          const r = await fetch(`${apiBase}/api/v1/datasources/${encodeURIComponent(id)}/status`);
+          if (!r.ok) { next[id] = "disconnected"; return; }
+          const data = await r.json() as { connected: boolean };
+          next[id] = data.connected ? "connected" : "disconnected";
+        } catch { next[id] = "unknown"; }
+      }));
+      setStatuses(next);
+    };
+    poll();
+    const iv = setInterval(poll, 5000);
+    return () => clearInterval(iv);
+  }, [dsIds.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return statuses;
+}
+
+function ProjectSettings({ onShowMCP }: { onShowMCP?: () => void }) {
   const { project, exportJSON, loadProject, addDatasource, removeDatasource } = useProject();
   const [showAddDS, setShowAddDS] = useState(false);
+  const [scannerDS, setScannerDS] = useState<{ id: string; label: string; type: string } | null>(null);
+
+  const { state: deployState, msg: deployMsg, showLogin, setShowLogin, jwtRef, deploy } = useDeployToRuntime(exportJSON);
+  const dsStatuses = useDSStatus(project.datasources.map((d) => d.id));
+
+  const importGit = () => {
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = ".json";
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const raw = JSON.parse(reader.result as string) as Record<string, unknown>;
+          if (raw._gitFormat) {
+            const filesMap = raw._files as Record<string, unknown>;
+            const strMap: Record<string, string> = {};
+            for (const [k, v] of Object.entries(filesMap)) strMap[k] = JSON.stringify(v);
+            loadProject(importGitFormat(strMap));
+          } else {
+            loadProject(raw as Parameters<typeof loadProject>[0]);
+          }
+        } catch (e) { alert(`Import failed: ${(e as Error).message}`); }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  };
 
   const inp = "w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-zinc-500";
 
@@ -58,6 +239,17 @@ function ProjectSettings() {
     loadProject({ ...p, ...patch });
   };
 
+  const exportHtml = () => {
+    const html = generateStandaloneHtml(project, "");
+    const blob = new Blob([html], { type: "text/html" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `${(project.name ?? "project").replace(/\s+/g, "-")}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="p-3 space-y-4">
       {/* Name */}
@@ -69,6 +261,60 @@ function ProjectSettings() {
           placeholder="Untitled"
           className={inp}
         />
+      </div>
+
+      {/* Deploy */}
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Deploy</div>
+        <div className="space-y-1">
+          <button
+            onClick={deploy}
+            disabled={deployState === "busy"}
+            className={`w-full text-xs py-1.5 rounded text-left px-2 flex items-center gap-2 transition-colors disabled:opacity-50 ${
+              deployState === "ok" ? "bg-emerald-700 text-emerald-100" :
+              deployState === "err" ? "bg-red-800 text-red-100" :
+              "bg-blue-700 hover:bg-blue-600 text-white"
+            }`}
+          >
+            <span>{deployState === "busy" ? "⏳" : deployState === "ok" ? "✓" : deployState === "err" ? "✗" : "↑"}</span>
+            <span>{deployState === "idle" ? "Deploy to Runtime" : deployMsg || "Deploying…"}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Export / Import */}
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Export / Import</div>
+        <div className="space-y-1">
+          <button
+            onClick={exportHtml}
+            className="w-full text-xs py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-left px-2 flex items-center gap-2"
+          >
+            <span>⬇</span>
+            <span>Export Standalone HTML</span>
+          </button>
+          <button
+            onClick={() => downloadGitFormat(project)}
+            className="w-full text-xs py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-left px-2 flex items-center gap-2"
+          >
+            <span>⬇</span>
+            <span>Export Git Format</span>
+          </button>
+          <button
+            onClick={importGit}
+            className="w-full text-xs py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-left px-2 flex items-center gap-2"
+          >
+            <span>⬆</span>
+            <span>Import Project / Git Format</span>
+          </button>
+          <button
+            onClick={() => onShowMCP?.()}
+            className="w-full text-xs py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-left px-2 flex items-center gap-2"
+          >
+            <span>⚙</span>
+            <span>MCP Setup</span>
+          </button>
+        </div>
       </div>
 
       {/* Security */}
@@ -112,22 +358,32 @@ function ProjectSettings() {
           {project.datasources.length === 0 && (
             <div className="text-[11px] text-zinc-600 italic">No datasources yet.</div>
           )}
-          {project.datasources.map((d) => (
-            <div key={d.id} className="flex items-center gap-2 bg-zinc-800/60 rounded px-2 py-1.5">
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-mono text-zinc-200 truncate">{d.id}</div>
-                <div className="text-[10px] text-zinc-500">{d.type} · {d.label}</div>
+          {project.datasources.map((d) => {
+            const status = dsStatuses[d.id] ?? "unknown";
+            const dot = status === "connected" ? "bg-emerald-400" : status === "disconnected" ? "bg-red-500" : "bg-zinc-600";
+            const title = status === "connected" ? "Connected" : status === "disconnected" ? "Disconnected" : "Status unknown";
+            return (
+              <div key={d.id} className="flex items-center gap-2 bg-zinc-800/60 rounded px-2 py-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} title={title} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-mono text-zinc-200 truncate">{d.id}</div>
+                  <div className="text-[10px] text-zinc-500">{d.type} · {d.label}</div>
+                </div>
+                <button
+                  onClick={() => removeDatasource(d.id)}
+                  className="text-zinc-600 hover:text-red-400 text-xs shrink-0"
+                >×</button>
               </div>
-              <button
-                onClick={() => removeDatasource(d.id)}
-                className="text-zinc-600 hover:text-red-400 text-xs shrink-0"
-              >
-                ×
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
+
+      {/* Canvas Settings */}
+      <CanvasSettings />
+
+      {/* Symbol Packs */}
+      <SymbolPacksSettings />
 
       {/* Alarm Rules */}
       <AlarmRulesEditor />
@@ -135,9 +391,246 @@ function ProjectSettings() {
       {showAddDS && (
         <AddDatasourceModal
           onClose={() => setShowAddDS(false)}
-          onAdd={(ds) => { addDatasource(ds); setShowAddDS(false); }}
+          onAdd={(ds) => {
+            addDatasource(ds);
+            setShowAddDS(false);
+            setScannerDS({ id: ds.id, label: ds.label, type: ds.type });
+          }}
         />
       )}
+      {scannerDS && (
+        <TagScannerModal
+          dsId={scannerDS.id}
+          dsLabel={scannerDS.label}
+          dsType={scannerDS.type}
+          onClose={() => setScannerDS(null)}
+        />
+      )}
+      {showLogin && (
+        <RuntimeLoginModal
+          onClose={() => setShowLogin(false)}
+          onLogin={(jwt) => { jwtRef.current = jwt; deploy(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Symbol Packs ──────────────────────────────────────────────────────────────
+
+function SymbolPacksSettings() {
+  const { project, exportJSON, loadProject } = useProject();
+  const enabled: string[] = project.enabledSymbolPacks ?? SYMBOL_PACKS.map(p => p.id);
+
+  const toggle = (packId: string) => {
+    const next = enabled.includes(packId)
+      ? enabled.filter(id => id !== packId)
+      : [...enabled, packId];
+    const p = JSON.parse(exportJSON());
+    loadProject({ ...p, enabledSymbolPacks: next });
+  };
+
+  const toggleAll = () => {
+    const allEnabled = SYMBOL_PACKS.every(p => enabled.includes(p.id));
+    const p = JSON.parse(exportJSON());
+    loadProject({ ...p, enabledSymbolPacks: allEnabled ? [] : SYMBOL_PACKS.map(p => p.id) });
+  };
+
+  const allOn = SYMBOL_PACKS.every(p => enabled.includes(p.id));
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] uppercase tracking-wider text-zinc-500">Symbol Packs</div>
+        <button
+          onClick={toggleAll}
+          className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400"
+        >
+          {allOn ? "disable all" : "enable all"}
+        </button>
+      </div>
+      <div className="space-y-1.5">
+        {SYMBOL_PACKS.map(pack => {
+          const on = enabled.includes(pack.id);
+          const count = SYMBOLS.filter(s => s.packId === pack.id).length;
+          return (
+            <label
+              key={pack.id}
+              className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${
+                on
+                  ? "border-blue-600/40 bg-blue-950/30"
+                  : "border-zinc-800 bg-zinc-900/40 opacity-60"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={on}
+                onChange={() => toggle(pack.id)}
+                className="mt-0.5 accent-blue-500 shrink-0"
+              />
+              <div className="min-w-0">
+                <div className="text-[11px] font-medium text-zinc-200 leading-tight">{pack.name}</div>
+                <div className="text-[10px] text-zinc-500 leading-tight mt-0.5 truncate">{pack.description}</div>
+                <div className="text-[10px] text-zinc-600 mt-0.5">{count} symbols</div>
+              </div>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Canvas Settings ───────────────────────────────────────────────────────────
+
+const RES_PRESETS: { label: string; w: number; h: number }[] = [
+  { label: "1920×1080", w: 1920, h: 1080 },
+  { label: "1280×720",  w: 1280, h: 720  },
+  { label: "1024×768",  w: 1024, h: 768  },
+  { label: "800×600",   w: 800,  h: 600  },
+];
+
+function CanvasSettings() {
+  const { project, exportJSON, loadProject } = useProject();
+  const res: CanvasResolution = project.canvasResolution ?? { type: "dynamic" };
+  const snap: CanvasSnap = project.canvasSnap ?? "grid";
+
+  const [fw, setFw] = useState<number>(res.type === "fixed" ? res.width  : 1920);
+  const [fh, setFh] = useState<number>(res.type === "fixed" ? res.height : 1080);
+
+  const COL_W = 80, ROW_H = 64, GAP = 8;
+
+  const setPatch = (patch: Partial<typeof project>) => {
+    const p = JSON.parse(exportJSON());
+    loadProject({ ...p, ...patch });
+  };
+
+  const setRes = (r: CanvasResolution) => setPatch({ canvasResolution: r });
+
+  const setSnap = (s: CanvasSnap) => {
+    if (s === snap) return;
+    const p = JSON.parse(exportJSON());
+    // Convert all widget positions so they appear in the same place after the switch.
+    const pages = p.pages.map((pg: typeof project.pages[number]) => ({
+      ...pg,
+      widgets: pg.widgets.map((w: typeof project.pages[number]["widgets"][number]) => {
+        if (s === "pixel") {
+          // grid → pixel
+          return {
+            ...w,
+            x: Math.round((w.x ?? 0) * (COL_W + GAP)),
+            y: Math.round((w.y ?? 0) * (ROW_H + GAP)),
+            w: Math.max(40, Math.round(w.w * (COL_W + GAP) - GAP)),
+            h: Math.max(40, Math.round(w.h * (ROW_H + GAP) - GAP)),
+          };
+        } else {
+          // pixel → grid
+          return {
+            ...w,
+            x: Math.max(0, Math.round((w.x ?? 0) / (COL_W + GAP))),
+            y: Math.max(0, Math.round((w.y ?? 0) / (ROW_H + GAP))),
+            w: Math.max(1, Math.round((w.w + GAP) / (COL_W + GAP))),
+            h: Math.max(1, Math.round((w.h + GAP) / (ROW_H + GAP))),
+          };
+        }
+      }),
+    }));
+    loadProject({ ...p, pages, canvasSnap: s });
+  };
+
+  const numCls = "w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs font-mono focus:outline-none focus:border-zinc-500";
+
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Canvas</div>
+
+      {/* Snap */}
+      <div className="mb-3">
+        <div className="text-[10px] text-zinc-500 mb-1">Snap</div>
+        <div className="flex gap-1">
+          {(["grid", "pixel"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSnap(s)}
+              className={`flex-1 py-1 text-[11px] rounded border transition-colors ${
+                snap === s
+                  ? "bg-blue-600 border-blue-500 text-white"
+                  : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              {s === "grid" ? "Grid" : "Pixel"}
+            </button>
+          ))}
+        </div>
+        <div className="text-[10px] text-zinc-600 mt-1">
+          {snap === "grid" ? "Widgets snap to 80×64 grid cells" : "Pixel-precise positioning"}
+        </div>
+      </div>
+
+      {/* Resolution */}
+      <div>
+        <div className="text-[10px] text-zinc-500 mb-1">Resolution</div>
+        <div className="flex gap-1 mb-2">
+          {(["dynamic", "fixed"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => {
+                if (t === "dynamic") setRes({ type: "dynamic" });
+                else setRes({ type: "fixed", width: fw, height: fh });
+              }}
+              className={`flex-1 py-1 text-[11px] rounded border transition-colors ${
+                res.type === t
+                  ? "bg-blue-600 border-blue-500 text-white"
+                  : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              {t === "dynamic" ? "Dynamic" : "Fixed"}
+            </button>
+          ))}
+        </div>
+
+        {res.type === "fixed" && (
+          <>
+            <div className="flex gap-1 flex-wrap mb-2">
+              {RES_PRESETS.map((p) => (
+                <button
+                  key={p.label}
+                  onClick={() => { setFw(p.w); setFh(p.h); setRes({ type: "fixed", width: p.w, height: p.h }); }}
+                  className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                    res.width === p.w && res.height === p.h
+                      ? "bg-zinc-600 border-zinc-500 text-zinc-100"
+                      : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2 items-center">
+              <input
+                type="number"
+                value={fw}
+                min={320} max={7680}
+                onChange={(e) => { const v = Number(e.target.value); setFw(v); setRes({ type: "fixed", width: v, height: fh }); }}
+                className={numCls}
+                placeholder="Width"
+              />
+              <span className="text-zinc-600 text-xs shrink-0">×</span>
+              <input
+                type="number"
+                value={fh}
+                min={240} max={4320}
+                onChange={(e) => { const v = Number(e.target.value); setFh(v); setRes({ type: "fixed", width: fw, height: v }); }}
+                className={numCls}
+                placeholder="Height"
+              />
+            </div>
+          </>
+        )}
+        {res.type === "dynamic" && (
+          <div className="text-[10px] text-zinc-600">Canvas scales to fit the viewport</div>
+        )}
+      </div>
     </div>
   );
 }
@@ -335,10 +828,71 @@ function TemplateModal({ onClose, onSelect }: { onClose: () => void; onSelect: (
   );
 }
 
+// ── Page Thumbnail ────────────────────────────────────────────────────────────
+
+const THUMB_W = 200;
+const THUMB_H = 120;
+const COLS = 12;
+const COL_W = 80;
+const ROW_H = 64;
+const GAP   = 8;
+
+// Widget type → fill color for the schematic thumbnail
+const TYPE_COLOR: Record<string, string> = {
+  gauge:          "#3b82f6",
+  numericDisplay: "#22c55e",
+  numericInput:   "#16a34a",
+  textDisplay:    "#6b7280",
+  textInput:      "#4b5563",
+  led:            "#eab308",
+  button:         "#2563eb",
+  setpoint:       "#8b5cf6",
+  tank:           "#0ea5e9",
+  trend:          "#f59e0b",
+  historyLog:     "#64748b",
+  multiState:     "#ec4899",
+  alarmBanner:    "#ef4444",
+  image:          "#78716c",
+  symbol:         "#a78bfa",
+};
+
+function PageThumbnail({ page }: { page: import("../store/projectStore").Page }) {
+  // Natural canvas size in grid-px
+  const maxCol = Math.max(COLS, ...page.widgets.map(w => w.x + w.w));
+  const maxRow = Math.max(6,    ...page.widgets.map(w => w.y + w.h));
+  const naturalW = maxCol * (COL_W + GAP) - GAP;
+  const naturalH = maxRow * (ROW_H + GAP) - GAP;
+  const scale = Math.min(THUMB_W / naturalW, THUMB_H / naturalH);
+
+  return (
+    <svg
+      viewBox={`0 0 ${naturalW} ${naturalH}`}
+      width={THUMB_W}
+      height={THUMB_H}
+      style={{ display: "block" }}
+    >
+      <rect width={naturalW} height={naturalH} fill="#09090b" rx="4" />
+      {page.widgets.map((w) => {
+        const x = w.x * (COL_W + GAP);
+        const y = w.y * (ROW_H + GAP);
+        const rw = w.w * (COL_W + GAP) - GAP;
+        const rh = w.h * (ROW_H + GAP) - GAP;
+        const fill = TYPE_COLOR[w.type] ?? "#52525b";
+        return (
+          <g key={w.id}>
+            <rect x={x} y={y} width={rw} height={rh} fill={fill} opacity={0.25} rx="4" />
+            <rect x={x} y={y} width={rw} height={rh} fill="none" stroke={fill} strokeWidth="2" opacity={0.6} rx="4" />
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 // ── Page Settings ─────────────────────────────────────────────────────────────
 
 function PageSettings() {
-  const { project, activePageId, setActivePage, addPage, removePage, renamePage, addWidget } = useProject();
+  const { project, activePageId, setActivePage, addPage, removePage, renamePage, addWidget, updatePage } = useProject();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [showTemplates, setShowTemplates] = useState(false);
@@ -348,7 +902,6 @@ function PageSettings() {
 
   const applyTemplate = (t: Template) => {
     addPage(t.name === "Blank" ? undefined : t.name);
-    // addPage switches activePageId; get it after the tick
     setTimeout(() => {
       const { activePageId: newId } = useProject.getState();
       t.widgets.forEach((w) => addWidget(newId, { ...w, id: newWidgetId() }));
@@ -358,43 +911,119 @@ function PageSettings() {
   return (
     <div className="p-3 space-y-3">
       <div className="text-[10px] uppercase tracking-wider text-zinc-500">Pages</div>
-      <div className="space-y-1">
-        {project.pages.map((p) => (
-          <div
-            key={p.id}
-            onClick={() => setActivePage(p.id)}
-            className={`group flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer ${
-              activePageId === p.id ? "bg-zinc-700 text-zinc-100" : "hover:bg-zinc-800 text-zinc-400"
-            }`}
-          >
-            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${activePageId === p.id ? "bg-blue-400" : "bg-zinc-600"}`} />
-            {editingId === p.id ? (
-              <input
-                autoFocus value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onBlur={commitRename}
-                onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") setEditingId(null); e.stopPropagation(); }}
-                onClick={(e) => e.stopPropagation()}
-                className="flex-1 bg-zinc-600 rounded px-1 text-xs outline-none text-zinc-100"
-              />
-            ) : (
-              <span className="flex-1 text-xs truncate" onDoubleClick={(e) => { e.stopPropagation(); startRename(p.id, p.name); }}>
-                {p.name}
-              </span>
-            )}
-            {project.pages.length > 1 && (
-              <button onClick={(e) => { e.stopPropagation(); removePage(p.id); }} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 text-xs shrink-0">×</button>
-            )}
-          </div>
-        ))}
+
+      <div className="space-y-2">
+        {project.pages.map((p) => {
+          const isActive = p.id === activePageId;
+          return (
+            <div
+              key={p.id}
+              onClick={() => setActivePage(p.id)}
+              className={`group rounded-lg overflow-hidden cursor-pointer border-2 transition-colors ${
+                isActive ? "border-blue-500" : "border-zinc-700 hover:border-zinc-500"
+              }`}
+            >
+              {/* Thumbnail */}
+              <div className="bg-zinc-950 overflow-hidden">
+                <PageThumbnail page={p} />
+              </div>
+
+              {/* Name bar */}
+              <div className={`flex items-center gap-1.5 px-2 py-1 ${isActive ? "bg-blue-900/30" : "bg-zinc-800/60"}`}>
+                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActive ? "bg-blue-400" : "bg-zinc-600"}`} />
+                {editingId === p.id ? (
+                  <input
+                    autoFocus value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") setEditingId(null); e.stopPropagation(); }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex-1 bg-zinc-600 rounded px-1 text-xs outline-none text-zinc-100"
+                  />
+                ) : (
+                  <span
+                    className="flex-1 text-xs truncate"
+                    onDoubleClick={(e) => { e.stopPropagation(); startRename(p.id, p.name); }}
+                  >
+                    {p.name}
+                  </span>
+                )}
+                <span className="text-[10px] text-zinc-600 shrink-0">{p.widgets.length}w</span>
+                {project.pages.length > 1 && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); removePage(p.id); }}
+                    className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 text-xs shrink-0"
+                  >×</button>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
+
       <button
         onClick={() => setShowTemplates(true)}
         className="w-full text-xs py-1.5 rounded border border-dashed border-zinc-700 text-zinc-500 hover:border-zinc-500 hover:text-zinc-300 transition-colors"
       >
         + Add Page
       </button>
+      {/* Background color for active page */}
+      {(() => {
+        const activePg = project.pages.find(p => p.id === activePageId);
+        if (!activePg) return null;
+        return (
+          <div className="flex items-center gap-2 pt-1 border-t border-zinc-800">
+            <span className="text-[10px] text-zinc-500 flex-1">Page background</span>
+            <input
+              type="color"
+              value={activePg.backgroundColor ?? "#09090b"}
+              onChange={(e) => updatePage(activePageId, { backgroundColor: e.target.value })}
+              className="w-8 h-6 rounded cursor-pointer border border-zinc-700 bg-transparent p-0"
+              title="Background color"
+            />
+            {activePg.backgroundColor && (
+              <button
+                onClick={() => updatePage(activePageId, { backgroundColor: undefined })}
+                className="text-[10px] text-zinc-500 hover:text-zinc-300"
+                title="Reset to default"
+              >✕</button>
+            )}
+          </div>
+        );
+      })()}
+
       <div className="text-[10px] text-zinc-600">Double-click a page name to rename.</div>
+
+      {/* Page script editor */}
+      {(() => {
+        const activePg = project.pages.find((p) => p.id === activePageId);
+        if (!activePg) return null;
+        return (
+          <div className="border-t border-zinc-800 pt-3 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-wider text-zinc-500">Page Script</span>
+              {activePg.script && (
+                <button
+                  onClick={() => updatePage(activePageId, { script: undefined })}
+                  className="text-[10px] text-zinc-600 hover:text-red-400"
+                >clear</button>
+              )}
+            </div>
+            <div className="text-[10px] text-zinc-600 leading-relaxed">
+              Runs when this page opens. Available: <code className="text-zinc-400">navigate(name)</code>, <code className="text-zinc-400">readTag(b)</code>, <code className="text-zinc-400">writeTag(b,v)</code>, <code className="text-zinc-400">onTimer(ms,fn)</code>, <code className="text-zinc-400">afterDelay(ms,fn)</code>, <code className="text-zinc-400">onTagChange(b,fn)</code>, <code className="text-zinc-400">log(...)</code>
+            </div>
+            <textarea
+              value={activePg.script ?? ""}
+              onChange={(e) => updatePage(activePageId, { script: e.target.value || undefined })}
+              placeholder={"// Example: go back to Main after 5 minutes\nonTimer(5 * 60 * 1000, () => navigate('Main'));"}
+              rows={8}
+              spellCheck={false}
+              className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-[11px] font-mono text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-zinc-500 resize-y"
+            />
+          </div>
+        );
+      })()}
+
       {showTemplates && <TemplateModal onClose={() => setShowTemplates(false)} onSelect={applyTemplate} />}
     </div>
   );

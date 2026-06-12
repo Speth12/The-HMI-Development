@@ -4,6 +4,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/Speth12/x-hmi/internal/mcp"
 	"github.com/Speth12/x-hmi/internal/runtime"
 	"github.com/Speth12/x-hmi/internal/versionstore"
 	"github.com/go-chi/chi/v5"
@@ -29,6 +30,11 @@ func New(rt *runtime.Runtime, assets http.Handler, vs ...*versionstore.Store) *S
 		s.versions = vs[0]
 	}
 	s.routes(assets)
+
+	// MCP server — unauthenticated so Claude Code can connect without JWT.
+	// Bind to a separate sub-path; no CORS restriction needed (local only).
+	r.Mount("/mcp", mcp.New(rt))
+
 	return s
 }
 
@@ -140,6 +146,7 @@ func (s *Server) routes(assets http.Handler) {
 
 	r.Get("/ws/tags", s.handleWS)
 	r.Get("/ws/alarms", s.handleAlarmWS)
+	r.Get("/ws/events", s.handleEventsWS)
 
 	if assets != nil {
 		r.Handle("/*", assets)

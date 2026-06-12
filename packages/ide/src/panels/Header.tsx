@@ -159,9 +159,10 @@ type HeaderProps = {
   onDemo: () => void;
   showJSON: boolean;
   onToggleJSON: () => void;
+  onPreview: () => void;
 };
 
-export function Header({ onHelp, onDemo, showJSON, onToggleJSON }: HeaderProps) {
+export function Header({ onHelp, onDemo, showJSON, onToggleJSON, onPreview }: HeaderProps) {
   const { exportJSON, loadProject } = useProject();
   const { canUndo, canRedo, undo, redo } = useProject(
     useShallow((s) => ({ canUndo: s.canUndo, canRedo: s.canRedo, undo: s.undo, redo: s.redo }))
@@ -274,8 +275,8 @@ export function Header({ onHelp, onDemo, showJSON, onToggleJSON }: HeaderProps) 
 
       {/* Preview */}
       <button
-        onClick={() => window.open(previewUrl, "_blank")}
-        title="Open operator panel"
+        onClick={onPreview}
+        title="Full-screen operator view (F5)"
         className="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 shrink-0"
       >⬡ Preview</button>
 

@@ -32,3 +32,11 @@ export function wsUrl(): string {
   }
   return (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/tags";
 }
+
+/** WebSocket URL for the runtime event bus (navigate, alarms, etc). */
+export function wsEventsUrl(): string {
+  if (apiBase) {
+    return apiBase.replace(/^http/, "ws") + "/ws/events";
+  }
+  return (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/events";
+}

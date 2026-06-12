@@ -5,9 +5,9 @@ import { useProject, type Widget } from "../store/projectStore";
 import { newWidgetId } from "../store/projectStore";
 
 // Module-level clipboard — survives page switches and effect re-runs.
-let _clipboard: Widget | null = null;
+let _clipboard: Widget | Widget[] | null = null;
 export const getClipboard = () => _clipboard;
-export const setClipboard = (w: Widget | null) => { _clipboard = w; };
+export const setClipboard = (w: Widget | Widget[] | null) => { _clipboard = w; };
 
 export function useKeyboardShortcuts() {
   const { activePageId, selectedWidgetId, selectWidget, removeWidget, addWidget, project, exportJSON, undo, redo } = useProject();
@@ -77,13 +77,16 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // Ctrl/Cmd+V — paste widget onto active page (cross-page supported)
+      // Ctrl/Cmd+V — paste widget(s) onto active page (cross-page supported)
       if ((e.ctrlKey || e.metaKey) && e.key === "v" && _clipboard) {
         e.preventDefault();
-        const w = _clipboard;
         const page = project.pages.find((p) => p.id === activePageId);
         const nextY = page?.widgets.reduce((max, wg) => Math.max(max, wg.y + wg.h), 0) ?? 0;
-        addWidget(activePageId, { ...w, id: newWidgetId(), y: nextY, locked: undefined });
+        if (Array.isArray(_clipboard)) {
+          _clipboard.forEach((w) => addWidget(activePageId, { ...w, id: newWidgetId(), y: nextY, locked: undefined }));
+        } else {
+          addWidget(activePageId, { ..._clipboard, id: newWidgetId(), y: nextY, locked: undefined });
+        }
         return;
       }
 

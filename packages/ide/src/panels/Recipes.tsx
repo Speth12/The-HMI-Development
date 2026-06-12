@@ -25,19 +25,36 @@ export function Recipes() {
   const apply = async (recipe: Recipe) => {
     setApplyState((s) => ({ ...s, [recipe.id]: "busy" }));
     setApplyMsg((m) => ({ ...m, [recipe.id]: "" }));
-    try {
-      const r = await fetch(`${apiBase}/api/v1/recipes/${recipe.id}/apply`, { method: "POST" });
-      const data = (await r.json()) as { ok: boolean; applied?: number; errors?: string[] };
-      if (data.ok) {
-        setApplyState((s) => ({ ...s, [recipe.id]: "ok" }));
-        setApplyMsg((m) => ({ ...m, [recipe.id]: `Applied ${data.applied ?? "?"} writes` }));
-      } else {
-        setApplyState((s) => ({ ...s, [recipe.id]: "err" }));
-        setApplyMsg((m) => ({ ...m, [recipe.id]: (data.errors ?? []).join("; ") }));
-      }
-    } catch (e) {
+    const errors: string[] = [];
+    let applied = 0;
+
+    await Promise.all(
+      recipe.entries.map(async (entry) => {
+        if (!entry.binding) return;
+        const sep = entry.binding.indexOf(":");
+        if (sep < 0) { errors.push(`bad binding: ${entry.binding}`); return; }
+        const datasource = entry.binding.slice(0, sep);
+        const path = entry.binding.slice(sep + 1);
+        try {
+          const r = await fetch(`${apiBase}/api/v1/tag/${encodeURIComponent(path)}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ datasource, value: entry.value }),
+          });
+          if (r.ok) { applied++; }
+          else { errors.push(`${path}: HTTP ${r.status}`); }
+        } catch (e) {
+          errors.push(`${path}: ${(e as Error).message}`);
+        }
+      })
+    );
+
+    if (errors.length === 0) {
+      setApplyState((s) => ({ ...s, [recipe.id]: "ok" }));
+      setApplyMsg((m) => ({ ...m, [recipe.id]: `Applied ${applied} write${applied !== 1 ? "s" : ""}` }));
+    } else {
       setApplyState((s) => ({ ...s, [recipe.id]: "err" }));
-      setApplyMsg((m) => ({ ...m, [recipe.id]: (e as Error).message }));
+      setApplyMsg((m) => ({ ...m, [recipe.id]: errors.join("; ") }));
     }
     setTimeout(() => setApplyState((s) => ({ ...s, [recipe.id]: "idle" })), 3000);
   };

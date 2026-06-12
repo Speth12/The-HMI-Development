@@ -4,7 +4,72 @@ import { create } from "zustand";
 export type WidgetType =
   | "gauge" | "trend" | "led" | "button" | "numericInput"
   | "numericDisplay" | "textInput" | "textDisplay" | "historyLog"
-  | "tank" | "setpoint" | "multiState" | "alarmBanner" | "image";
+  | "tank" | "setpoint" | "multiState" | "alarmBanner" | "image" | "symbol"
+  | "faceplate" | "table";
+
+export type UDTField = {
+  name: string;
+  type: "bool" | "int" | "real" | "string";
+  unit?: string;
+  description?: string;
+};
+
+export type UDT = {
+  id: string;
+  name: string;
+  description?: string;
+  fields: UDTField[];
+};
+
+export type AssetNode = {
+  id: string;
+  name: string;
+  parentId?: string;
+  description?: string;
+  tagPrefix?: string;
+  udtId?: string;
+  iconType?: "plant" | "area" | "unit" | "device" | "sensor";
+};
+
+export type FaceplateParam = { name: string; description?: string };
+export type FaceplateWidget = Omit<Widget, "id"> & { localId: string };
+export type Faceplate = {
+  id: string;
+  name: string;
+  description?: string;
+  params: FaceplateParam[];
+  widgets: FaceplateWidget[];
+};
+
+export type DynActionType =
+  | "writeValue" | "toggleValue" | "incrementValue"
+  | "navigate" | "openUrl";
+
+export type Dynamic = {
+  id: string;
+  kind: "visibility" | "colorFill" | "blink" | "rotation" | "disable"
+      | "onClick" | "onPressed" | "onReleased";
+  // property dynamics — tag binding
+  binding?: string;
+  // colorFill: truthy/falsy → color ring
+  trueColor?: string;
+  falseColor?: string;
+  // blink: flash when tag is truthy
+  blinkPeriodMs?: number;
+  blinkColor?: string;
+  // rotation: map value range → angle range
+  minValue?: number;
+  maxValue?: number;
+  minAngle?: number;
+  maxAngle?: number;
+  // action dynamics
+  actionType?: DynActionType;
+  writeTo?: string;       // binding to write to (may differ from read binding)
+  writeValue?: unknown;   // for writeValue
+  step?: number;          // for incrementValue
+  pageId?: string;        // for navigate
+  url?: string;           // for openUrl
+};
 
 export type Widget = {
   id: string;
@@ -13,10 +78,12 @@ export type Widget = {
   binding?: string;
   visibleBinding?: string;
   locked?: boolean;
+  groupId?: string;
   config?: Record<string, unknown>;
+  dynamics?: Dynamic[];
 };
 
-export type Page = { id: string; name: string; widgets: Widget[] };
+export type Page = { id: string; name: string; widgets: Widget[]; backgroundColor?: string; script?: string };
 
 export type DatasourceType = "opcua" | "mbtcp" | "mqtt" | "rest" | "virtual";
 export type Datasource = {
@@ -61,6 +128,15 @@ export type ImageAsset = {
   size: number;      // bytes (original file size)
 };
 
+export type CanvasResolution =
+  | { type: "dynamic" }
+  | { type: "fixed"; width: number; height: number };
+
+export type CanvasSnap = "grid" | "pixel";
+
+export type UserRole = "admin" | "operator" | "viewer";
+export type ProjectUser = { id: string; name: string; pin: string; role: UserRole };
+
 export type Project = {
   version: string;
   name?: string;
@@ -71,6 +147,13 @@ export type Project = {
   alarmRules?: AlarmRule[];
   recipes?: Recipe[];
   images?: ImageAsset[];
+  canvasResolution?: CanvasResolution;
+  canvasSnap?: CanvasSnap;
+  enabledSymbolPacks?: string[];
+  users?: ProjectUser[];
+  udts?: UDT[];
+  assets?: AssetNode[];
+  faceplates?: Faceplate[];
 };
 
 const MAX_HISTORY = 50;
@@ -100,7 +183,13 @@ type State = {
 
   addWidget: (pageId: string, w: Widget) => void;
   updateWidget: (pageId: string, id: string, patch: Partial<Widget>) => void;
+  updateWidgets: (pageId: string, patches: { id: string; patch: Partial<Widget> }[]) => void;
   removeWidget: (pageId: string, id: string) => void;
+  removeWidgets: (pageId: string, ids: string[]) => void;
+  reorderWidget: (pageId: string, id: string, dir: "front" | "back" | "forward" | "backward") => void;
+  groupWidgets: (pageId: string, ids: string[]) => void;
+  ungroupWidgets: (pageId: string, groupId: string) => void;
+  updatePage: (id: string, patch: Partial<Omit<Page, "id" | "widgets">>) => void;
 
   addAlarmRule: (rule: AlarmRule) => void;
   updateAlarmRule: (id: string, patch: Partial<AlarmRule>) => void;
@@ -113,6 +202,18 @@ type State = {
   importImage: (asset: ImageAsset) => void;
   deleteImage: (id: string) => void;
   renameImage: (id: string, name: string) => void;
+
+  addUDT: (udt: UDT) => void;
+  updateUDT: (id: string, patch: Partial<UDT>) => void;
+  removeUDT: (id: string) => void;
+
+  addAsset: (node: AssetNode) => void;
+  updateAsset: (id: string, patch: Partial<AssetNode>) => void;
+  removeAsset: (id: string) => void;
+
+  addFaceplate: (fp: Faceplate) => void;
+  updateFaceplate: (id: string, patch: Partial<Faceplate>) => void;
+  removeFaceplate: (id: string) => void;
 
   loadProject: (p: Project) => void;
   exportJSON: () => string;
@@ -251,6 +352,25 @@ export const useProject = create<State>((set, get) => {
       }));
     },
 
+    updateWidgets: (pageId, patches) => {
+      pushHistory();
+      const patchMap = new Map(patches.map(({ id, patch }) => [id, patch]));
+      set((s) => ({
+        project: {
+          ...s.project,
+          pages: s.project.pages.map((p) =>
+            p.id !== pageId ? p : {
+              ...p,
+              widgets: p.widgets.map((w) => {
+                const patch = patchMap.get(w.id);
+                return patch ? { ...w, ...patch } : w;
+              }),
+            },
+          ),
+        },
+      }));
+    },
+
     removeWidget: (pageId, id) => {
       pushHistory();
       set((s) => ({
@@ -261,6 +381,83 @@ export const useProject = create<State>((set, get) => {
           ),
         },
         selectedWidgetId: null,
+      }));
+    },
+
+    removeWidgets: (pageId, ids) => {
+      pushHistory();
+      const idSet = new Set(ids);
+      set((s) => ({
+        project: {
+          ...s.project,
+          pages: s.project.pages.map((p) =>
+            p.id === pageId ? { ...p, widgets: p.widgets.filter((w) => !idSet.has(w.id)) } : p,
+          ),
+        },
+        selectedWidgetId: null,
+      }));
+    },
+
+    reorderWidget: (pageId, id, dir) => {
+      pushHistory();
+      set((s) => ({
+        project: {
+          ...s.project,
+          pages: s.project.pages.map((p) => {
+            if (p.id !== pageId) return p;
+            const ws = [...p.widgets];
+            const i = ws.findIndex((w) => w.id === id);
+            if (i < 0) return p;
+            const [item] = ws.splice(i, 1);
+            if (dir === "front")    ws.push(item);
+            else if (dir === "back") ws.unshift(item);
+            else if (dir === "forward") ws.splice(Math.min(ws.length, i + 1), 0, item);
+            else ws.splice(Math.max(0, i - 1), 0, item);
+            return { ...p, widgets: ws };
+          }),
+        },
+      }));
+    },
+
+    groupWidgets: (pageId, ids) => {
+      pushHistory();
+      const groupId = `grp-${Math.random().toString(36).slice(2, 8)}`;
+      const idSet = new Set(ids);
+      set((s) => ({
+        project: {
+          ...s.project,
+          pages: s.project.pages.map((p) =>
+            p.id !== pageId ? p : {
+              ...p,
+              widgets: p.widgets.map((w) => idSet.has(w.id) ? { ...w, groupId } : w),
+            }
+          ),
+        },
+      }));
+    },
+
+    ungroupWidgets: (pageId, groupId) => {
+      pushHistory();
+      set((s) => ({
+        project: {
+          ...s.project,
+          pages: s.project.pages.map((p) =>
+            p.id !== pageId ? p : {
+              ...p,
+              widgets: p.widgets.map((w) => w.groupId === groupId ? { ...w, groupId: undefined } : w),
+            }
+          ),
+        },
+      }));
+    },
+
+    updatePage: (id, patch) => {
+      pushHistory();
+      set((s) => ({
+        project: {
+          ...s.project,
+          pages: s.project.pages.map((p) => p.id === id ? { ...p, ...patch } : p),
+        },
       }));
     },
 
@@ -338,6 +535,45 @@ export const useProject = create<State>((set, get) => {
       }));
     },
 
+    addUDT: (udt) => {
+      pushHistory();
+      set((s) => ({ project: { ...s.project, udts: [...(s.project.udts ?? []), udt] } }));
+    },
+    updateUDT: (id, patch) => {
+      pushHistory();
+      set((s) => ({ project: { ...s.project, udts: (s.project.udts ?? []).map((u) => u.id === id ? { ...u, ...patch } : u) } }));
+    },
+    removeUDT: (id) => {
+      pushHistory();
+      set((s) => ({ project: { ...s.project, udts: (s.project.udts ?? []).filter((u) => u.id !== id) } }));
+    },
+
+    addAsset: (node) => {
+      pushHistory();
+      set((s) => ({ project: { ...s.project, assets: [...(s.project.assets ?? []), node] } }));
+    },
+    updateAsset: (id, patch) => {
+      pushHistory();
+      set((s) => ({ project: { ...s.project, assets: (s.project.assets ?? []).map((a) => a.id === id ? { ...a, ...patch } : a) } }));
+    },
+    removeAsset: (id) => {
+      pushHistory();
+      set((s) => ({ project: { ...s.project, assets: (s.project.assets ?? []).filter((a) => a.id !== id) } }));
+    },
+
+    addFaceplate: (fp) => {
+      pushHistory();
+      set((s) => ({ project: { ...s.project, faceplates: [...(s.project.faceplates ?? []), fp] } }));
+    },
+    updateFaceplate: (id, patch) => {
+      pushHistory();
+      set((s) => ({ project: { ...s.project, faceplates: (s.project.faceplates ?? []).map((f) => f.id === id ? { ...f, ...patch } : f) } }));
+    },
+    removeFaceplate: (id) => {
+      pushHistory();
+      set((s) => ({ project: { ...s.project, faceplates: (s.project.faceplates ?? []).filter((f) => f.id !== id) } }));
+    },
+
     loadProject: (p) =>
       set({
         project: p,
@@ -358,6 +594,21 @@ export const useProject = create<State>((set, get) => {
 });
 
 export const newWidgetId = () => uid("w");
+
+// ── Virtual datasource sync ────────────────────────────────────────────────
+import { virtualTagStore } from "./virtualTagStore";
+
+let _lastVirtualIds: string[] = [];
+useProject.subscribe((state) => {
+  const ids = state.project.datasources
+    .filter((d) => d.type === "virtual")
+    .map((d) => d.id);
+  const added   = ids.filter((id) => !_lastVirtualIds.includes(id));
+  const removed = _lastVirtualIds.filter((id) => !ids.includes(id));
+  added.forEach((id)   => virtualTagStore.registerDatasource(id));
+  removed.forEach((id) => virtualTagStore.unregisterDatasource(id));
+  _lastVirtualIds = ids;
+});
 
 // ── LocalStorage auto-save / auto-restore ──────────────────────────────────
 

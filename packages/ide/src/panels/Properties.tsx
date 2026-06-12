@@ -1,5 +1,5 @@
-import { useRef } from "react";
-import { useProject } from "../store/projectStore";
+import { useRef, useState } from "react";
+import { useProject, type Dynamic } from "../store/projectStore";
 import { useTag } from "../hooks/useTag";
 import { PositionEditor } from "./Canvas";
 import { registerWidget, getWidget, type PropertiesPanelProps } from "../widgets/widgetRegistry";
@@ -76,17 +76,8 @@ export function Properties() {
         <LiveTagPreview binding={w.binding} />
       </div>
 
-      {/* Visibility binding */}
-      <div>
-        <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Visibility</div>
-        <input
-          value={w.visibleBinding ?? ""}
-          onChange={(e) => updateWidget(page.id, w.id, { visibleBinding: e.target.value || undefined })}
-          placeholder="ds:tagPath (BOOL — hides when 0/false)"
-          className={`${inp} font-mono`}
-        />
-        <LiveTagPreview binding={w.visibleBinding} />
-      </div>
+      {/* Dynamics */}
+      <DynamicsEditor w={w} pageId={page.id} />
 
       {/* Layout */}
       <div>
@@ -541,6 +532,252 @@ function ThresholdEditor({ w, setConfig, inp, numInp, label }: {
           <div className="text-[10px] text-zinc-600 italic">No thresholds — bar stays green</div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Dynamics editor ───────────────────────────────────────────────────────
+
+const DYN_KINDS: { kind: Dynamic["kind"]; label: string; group: "property" | "action" }[] = [
+  { kind: "visibility", label: "Visibility",  group: "property" },
+  { kind: "colorFill",  label: "Color / Fill", group: "property" },
+  { kind: "blink",      label: "Blink",        group: "property" },
+  { kind: "rotation",   label: "Rotation",     group: "property" },
+  { kind: "disable",    label: "Disable",      group: "property" },
+  { kind: "onClick",    label: "On Click",     group: "action"   },
+  { kind: "onPressed",  label: "On Pressed",   group: "action"   },
+  { kind: "onReleased", label: "On Released",  group: "action"   },
+];
+
+const ACTION_TYPES: { value: string; label: string }[] = [
+  { value: "writeValue",    label: "Write value"    },
+  { value: "toggleValue",   label: "Toggle value"   },
+  { value: "incrementValue",label: "Increment value"},
+  { value: "navigate",      label: "Navigate page"  },
+  { value: "openUrl",       label: "Open URL"       },
+];
+
+function uid() { return Math.random().toString(36).slice(2, 8); }
+
+function DynamicCard({ d, onUpdate, onRemove, pages, inp, numInp }: {
+  d: Dynamic;
+  onUpdate: (patch: Partial<Dynamic>) => void;
+  onRemove: () => void;
+  pages: { id: string; name: string }[];
+  inp: string; numInp: string;
+}) {
+  const [open, setOpen] = useState(true);
+  const meta = DYN_KINDS.find((k) => k.kind === d.kind);
+  const isAction = meta?.group === "action";
+
+  return (
+    <div className="border border-zinc-700/60 rounded-lg overflow-hidden">
+      <div
+        className="flex items-center gap-2 px-2 py-1.5 bg-zinc-800/60 cursor-pointer select-none"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="text-[9px] text-zinc-500">{open ? "▼" : "▶"}</span>
+        <span className="text-[11px] font-medium text-zinc-200 flex-1">{meta?.label ?? d.kind}</span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
+          className="text-zinc-600 hover:text-red-400 text-sm leading-none px-1"
+        >×</button>
+      </div>
+
+      {open && (
+        <div className="p-2 space-y-2 bg-zinc-900/40">
+          {/* Property dynamics — binding */}
+          {!isAction && (
+            <div>
+              <div className="text-[10px] text-zinc-500 mb-0.5">Binding</div>
+              <input
+                value={d.binding ?? ""}
+                onChange={(e) => onUpdate({ binding: e.target.value || undefined })}
+                placeholder="ds:tagPath"
+                className={`${inp} font-mono text-[10px]`}
+              />
+            </div>
+          )}
+
+          {/* colorFill colors */}
+          {d.kind === "colorFill" && (
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <div className="text-[10px] text-zinc-500 mb-0.5">True color</div>
+                <div className="flex gap-1">
+                  <input type="color" value={d.trueColor ?? "#22c55e"} onChange={(e) => onUpdate({ trueColor: e.target.value })}
+                    className="h-6 w-8 rounded border border-zinc-700 bg-zinc-900 cursor-pointer" />
+                  <input value={d.trueColor ?? "#22c55e"} onChange={(e) => onUpdate({ trueColor: e.target.value })}
+                    className={`${inp} flex-1 font-mono text-[10px]`} />
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] text-zinc-500 mb-0.5">False color</div>
+                <div className="flex gap-1">
+                  <input type="color" value={d.falseColor ?? "#3f3f46"} onChange={(e) => onUpdate({ falseColor: e.target.value })}
+                    className="h-6 w-8 rounded border border-zinc-700 bg-zinc-900 cursor-pointer" />
+                  <input value={d.falseColor ?? "#3f3f46"} onChange={(e) => onUpdate({ falseColor: e.target.value })}
+                    className={`${inp} flex-1 font-mono text-[10px]`} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* blink period */}
+          {d.kind === "blink" && (
+            <div>
+              <div className="text-[10px] text-zinc-500 mb-0.5">Period (ms)</div>
+              <input type="number" min={100} max={5000} step={100}
+                value={d.blinkPeriodMs ?? 800}
+                onChange={(e) => onUpdate({ blinkPeriodMs: Number(e.target.value) })}
+                className={numInp} />
+            </div>
+          )}
+
+          {/* rotation range */}
+          {d.kind === "rotation" && (
+            <>
+              <div className="grid grid-cols-2 gap-1.5">
+                <div>
+                  <div className="text-[10px] text-zinc-500 mb-0.5">Value min</div>
+                  <input type="number" value={d.minValue ?? 0} onChange={(e) => onUpdate({ minValue: Number(e.target.value) })} className={numInp} />
+                </div>
+                <div>
+                  <div className="text-[10px] text-zinc-500 mb-0.5">Value max</div>
+                  <input type="number" value={d.maxValue ?? 100} onChange={(e) => onUpdate({ maxValue: Number(e.target.value) })} className={numInp} />
+                </div>
+                <div>
+                  <div className="text-[10px] text-zinc-500 mb-0.5">Angle min °</div>
+                  <input type="number" value={d.minAngle ?? -90} onChange={(e) => onUpdate({ minAngle: Number(e.target.value) })} className={numInp} />
+                </div>
+                <div>
+                  <div className="text-[10px] text-zinc-500 mb-0.5">Angle max °</div>
+                  <input type="number" value={d.maxAngle ?? 90} onChange={(e) => onUpdate({ maxAngle: Number(e.target.value) })} className={numInp} />
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* action dynamics */}
+          {isAction && (
+            <>
+              <div>
+                <div className="text-[10px] text-zinc-500 mb-0.5">Action</div>
+                <select value={d.actionType ?? ""}
+                  onChange={(e) => onUpdate({ actionType: e.target.value as Dynamic["actionType"] || undefined })}
+                  className={inp}>
+                  <option value="">— choose —</option>
+                  {ACTION_TYPES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+                </select>
+              </div>
+
+              {d.actionType === "navigate" && (
+                <div>
+                  <div className="text-[10px] text-zinc-500 mb-0.5">Target page</div>
+                  <select value={d.pageId ?? ""} onChange={(e) => onUpdate({ pageId: e.target.value })} className={inp}>
+                    <option value="">— select —</option>
+                    {pages.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {d.actionType === "openUrl" && (
+                <div>
+                  <div className="text-[10px] text-zinc-500 mb-0.5">URL</div>
+                  <input value={d.url ?? ""} onChange={(e) => onUpdate({ url: e.target.value })} placeholder="https://…" className={inp} />
+                </div>
+              )}
+
+              {(d.actionType === "writeValue" || d.actionType === "toggleValue" || d.actionType === "incrementValue") && (
+                <div>
+                  <div className="text-[10px] text-zinc-500 mb-0.5">Write to binding</div>
+                  <input value={d.writeTo ?? ""} onChange={(e) => onUpdate({ writeTo: e.target.value || undefined })}
+                    placeholder="ds:tagPath" className={`${inp} font-mono text-[10px]`} />
+                </div>
+              )}
+
+              {d.actionType === "writeValue" && (
+                <div>
+                  <div className="text-[10px] text-zinc-500 mb-0.5">Value</div>
+                  <input value={String(d.writeValue ?? "")}
+                    onChange={(e) => onUpdate({ writeValue: isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value) })}
+                    placeholder="0" className={numInp} />
+                </div>
+              )}
+
+              {d.actionType === "incrementValue" && (
+                <div>
+                  <div className="text-[10px] text-zinc-500 mb-0.5">Step</div>
+                  <input type="number" value={d.step ?? 1} onChange={(e) => onUpdate({ step: Number(e.target.value) })} className={numInp} />
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DynamicsEditor({ w, pageId }: { w: import("../store/projectStore").Widget; pageId: string }) {
+  const { project, updateWidget } = useProject();
+  const [addOpen, setAddOpen] = useState(false);
+  const dynamics = w.dynamics ?? [];
+  const pages = project.pages.map((p) => ({ id: p.id, name: p.name }));
+
+  const inp = "w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-zinc-500";
+  const numInp = `${inp} font-mono`;
+
+  const add = (kind: Dynamic["kind"]) => {
+    updateWidget(pageId, w.id, { dynamics: [...dynamics, { id: uid(), kind }] });
+    setAddOpen(false);
+  };
+
+  const update = (id: string, patch: Partial<Dynamic>) => {
+    updateWidget(pageId, w.id, { dynamics: dynamics.map((d) => d.id === id ? { ...d, ...patch } : d) });
+  };
+
+  const remove = (id: string) => {
+    updateWidget(pageId, w.id, { dynamics: dynamics.filter((d) => d.id !== id) });
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] uppercase tracking-wider text-zinc-500">Dynamics</div>
+        <div className="relative">
+          <button
+            onClick={() => setAddOpen((o) => !o)}
+            className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700"
+          >+ Add</button>
+          {addOpen && (
+            <div className="absolute right-0 top-6 z-50 bg-zinc-800 border border-zinc-600 rounded-lg shadow-xl py-1 min-w-[150px]">
+              <div className="text-[9px] text-zinc-500 px-3 py-1 uppercase tracking-wider">Property</div>
+              {DYN_KINDS.filter((k) => k.group === "property").map((k) => (
+                <button key={k.kind} onClick={() => add(k.kind)}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-700 text-zinc-200">{k.label}</button>
+              ))}
+              <div className="border-t border-zinc-700 my-1" />
+              <div className="text-[9px] text-zinc-500 px-3 py-1 uppercase tracking-wider">Action</div>
+              {DYN_KINDS.filter((k) => k.group === "action").map((k) => (
+                <button key={k.kind} onClick={() => add(k.kind)}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-700 text-zinc-200">{k.label}</button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {dynamics.length === 0 ? (
+        <div className="text-[10px] text-zinc-600 italic">No dynamics. Click + Add to begin.</div>
+      ) : (
+        <div className="space-y-2">
+          {dynamics.map((d) => (
+            <DynamicCard key={d.id} d={d} onUpdate={(p) => update(d.id, p)} onRemove={() => remove(d.id)}
+              pages={pages} inp={inp} numInp={numInp} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
