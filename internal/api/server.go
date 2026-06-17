@@ -60,8 +60,13 @@ func (s *Server) Handler() http.Handler { return s.router }
 func (s *Server) routes(assets http.Handler) {
 	r := s.router
 
-	// Public: login
+	// Public: login, read-only IDE endpoints (no session needed)
 	r.Post("/api/v1/auth/login", s.handleLogin)
+	r.Get("/api/v1/project", s.handleGetProject)
+	r.Get("/api/v1/alive", s.handleAlive)
+	r.Post("/api/v1/datasources/test", s.handleTestDatasource)
+	r.Get("/api/v1/datasources/{id}/status", s.handleDatasourceStatus)
+	r.Get("/api/v1/datasources/{id}/tags", s.handleBrowseDatasource)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(s.jwtMiddleware)
@@ -69,14 +74,11 @@ func (s *Server) routes(assets http.Handler) {
 		r.Get("/alive", s.handleAlive)
 		r.Get("/whoami", s.handleWhoAmI)
 
-		r.Get("/project", s.handleGetProject)
 		r.With(s.requirePerm("project.deploy")).Post("/project", s.handlePostProject)
 
 		r.Route("/datasources", func(r chi.Router) {
 			r.Get("/", s.handleListDatasources)
-			r.Post("/test", s.handleTestDatasource)
-			r.Get("/{id}/status", s.handleDatasourceStatus)
-			r.Get("/{id}/tags", s.handleBrowseDatasource)
+			// status + tags also registered as public routes above (no auth needed for IDE browsing)
 		})
 
 		r.Route("/tag", func(r chi.Router) {

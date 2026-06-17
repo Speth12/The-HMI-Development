@@ -3,12 +3,23 @@
   "name": "PLCnext AXC F 3152 — Live Demo",
   "datasources": [
     {
-      "id": "plc",
+      "id": "rest",
       "type": "rest",
-      "label": "PLCnext AXC F 3152",
+      "label": "PLCnext REST",
       "config": {
         "endpoint": "https://10.0.0.210",
         "basePath": "/_pxc_api/v1.14"
+      }
+    },
+    {
+      "id": "opcua",
+      "type": "opcua",
+      "label": "OPC UA",
+      "config": {
+        "endpoint": "opc.tcp://10.0.0.210:4840",
+        "username": "admin",
+        "password": "9056bd62",
+        "securityMode": "None"
       }
     }
   ],
@@ -21,7 +32,7 @@
           "id": "w-gauge",
           "type": "gauge",
           "x": 0, "y": 0, "w": 4, "h": 3,
-          "binding": "plc:Arp.Plc.Eclr/MainInstance.iInteger",
+          "binding": "rest:Arp.Plc.Eclr/MainInstance.iInteger",
           "config": {
             "label": "Integer Value",
             "min": 0, "max": 1000, "unit": "units",
@@ -35,7 +46,7 @@
           "id": "w-numeric",
           "type": "numericDisplay",
           "x": 4, "y": 0, "w": 3, "h": 2,
-          "binding": "plc:Arp.Plc.Eclr/MainInstance.restInteger",
+          "binding": "rest:Arp.Plc.Eclr/MainInstance.restInteger",
           "config": {
             "label": "Rest Integer",
             "unit": "cnt",
@@ -46,7 +57,7 @@
           "id": "w-led",
           "type": "led",
           "x": 7, "y": 0, "w": 2, "h": 2,
-          "binding": "plc:Arp.Plc.Eclr/MainInstance.xBool_Out",
+          "binding": "rest:Arp.Plc.Eclr/MainInstance.xBool_Out",
           "config": {
             "label": "Bool Out",
             "trueLabel": "ACTIVE",
@@ -59,7 +70,7 @@
           "id": "w-button",
           "type": "button",
           "x": 9, "y": 0, "w": 3, "h": 2,
-          "binding": "plc:Arp.Plc.Eclr/MainInstance.xBool_API",
+          "binding": "rest:Arp.Plc.Eclr/MainInstance.xBool_API",
           "config": {
             "label": "Toggle API Bool",
             "momentary": false,
@@ -71,7 +82,7 @@
           "id": "w-multistate",
           "type": "multiState",
           "x": 4, "y": 2, "w": 3, "h": 2,
-          "binding": "plc:Arp.Plc.Eclr/MainInstance.xBool_Out",
+          "binding": "rest:Arp.Plc.Eclr/MainInstance.xBool_Out",
           "config": {
             "label": "Bool State",
             "states": [
@@ -84,7 +95,7 @@
           "id": "w-numinput",
           "type": "numericInput",
           "x": 7, "y": 2, "w": 2, "h": 2,
-          "binding": "plc:Arp.Plc.Eclr/MainInstance.xBool_In",
+          "binding": "rest:Arp.Plc.Eclr/MainInstance.xBool_In",
           "config": {
             "label": "Write Bool In",
             "unit": ""
@@ -94,7 +105,7 @@
           "id": "w-setpoint",
           "type": "setpoint",
           "x": 9, "y": 2, "w": 3, "h": 2,
-          "binding": "plc:Arp.Plc.Eclr/MainInstance.xBool_In",
+          "binding": "rest:Arp.Plc.Eclr/MainInstance.xBool_In",
           "config": {
             "label": "Bool In Setpoint",
             "min": 0, "max": 1, "step": 1,
@@ -105,7 +116,7 @@
           "id": "w-tank",
           "type": "tank",
           "x": 0, "y": 3, "w": 2, "h": 4,
-          "binding": "plc:Arp.Plc.Eclr/MainInstance.iInteger",
+          "binding": "rest:Arp.Plc.Eclr/MainInstance.iInteger",
           "config": {
             "label": "Integer Tank",
             "min": 0, "max": 1000, "unit": "units",
@@ -119,13 +130,13 @@
           "id": "w-trend",
           "type": "trend",
           "x": 2, "y": 3, "w": 7, "h": 4,
-          "binding": "plc:Arp.Plc.Eclr/MainInstance.iInteger",
+          "binding": "rest:Arp.Plc.Eclr/MainInstance.iInteger",
           "config": {
             "label": "Integer Trend",
             "duration": 120,
             "tags": [
-              { "binding": "plc:Arp.Plc.Eclr/MainInstance.iInteger",    "color": "#3b82f6", "label": "iInteger" },
-              { "binding": "plc:Arp.Plc.Eclr/MainInstance.restInteger", "color": "#22c55e", "label": "restInteger" }
+              { "binding": "rest:Arp.Plc.Eclr/MainInstance.iInteger",    "color": "#3b82f6", "label": "iInteger" },
+              { "binding": "rest:Arp.Plc.Eclr/MainInstance.restInteger", "color": "#22c55e", "label": "restInteger" }
             ]
           }
         },
@@ -133,7 +144,7 @@
           "id": "w-textinput",
           "type": "textInput",
           "x": 9, "y": 3, "w": 3, "h": 2,
-          "binding": "plc:Arp.Plc.Eclr/MainInstance.sString",
+          "binding": "rest:Arp.Plc.Eclr/MainInstance.sString",
           "config": {
             "label": "String Value",
             "placeholder": "enter string…"
@@ -143,7 +154,7 @@
           "id": "w-history",
           "type": "historyLog",
           "x": 0, "y": 7, "w": 12, "h": 4,
-          "binding": "plc:Arp.Plc.Eclr/MainInstance.iInteger",
+          "binding": "rest:Arp.Plc.Eclr/MainInstance.iInteger",
           "config": {
             "label": "Integer History Log",
             "pageSize": 25
@@ -156,7 +167,7 @@
     {
       "id": "alarm-integer-high",
       "name": "Integer High",
-      "binding": "plc:Arp.Plc.Eclr/MainInstance.iInteger",
+      "binding": "rest:Arp.Plc.Eclr/MainInstance.iInteger",
       "condition": "gt",
       "threshold": 900,
       "severity": "warning",

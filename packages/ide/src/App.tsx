@@ -5,7 +5,7 @@ import { DemoModal } from "./panels/Demo";
 import { Header } from "./panels/Header";
 import { ImageLibrary } from "./panels/ImageLibrary";
 import { LeftPanel } from "./panels/LeftPanel";
-import { Palette, WidgetPalette } from "./panels/Palette";
+import { WidgetPalette } from "./panels/Palette";
 import { Properties } from "./panels/Properties";
 import { StatusBar } from "./panels/StatusBar";
 import { SymbolLibrary } from "./panels/SymbolLibrary";
@@ -143,9 +143,8 @@ export function App() {
           className="w-1 shrink-0 cursor-col-resize hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors"
         />
 
-        {/* Center: palette strip + canvas (or JSON view) */}
-        <div className="flex-1 flex flex-col min-h-0">
-          <Palette />
+        {/* Center: canvas (or JSON view) */}
+        <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
           {showJSON ? <JSONPanel /> : <Canvas />}
         </div>
 

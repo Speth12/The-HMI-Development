@@ -3,6 +3,7 @@ import { useProject } from "../store/projectStore";
 import { useShallow } from "zustand/react/shallow";
 import { setApiBase } from "../store/runtimeTarget";
 import { tagStoreClient } from "../store/tagStoreClient";
+import { getToken, setToken, clearToken, authHeader } from "../store/runtimeAuth";
 import {
   subscribeTargets, getTargets, getActiveTarget,
   setActiveTarget, addTarget, updateTarget, removeTarget,
@@ -152,6 +153,68 @@ function ThemePicker() {
   );
 }
 
+// ── Runtime login modal ────────────────────────────────────────────────────
+
+function RuntimeLoginModal({
+  targetUrl,
+  onClose,
+  onSuccess,
+}: {
+  targetUrl: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [user, setUser] = useState("admin");
+  const [pass, setPass] = useState("");
+  const [err, setErr]   = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setErr("");
+    try {
+      const r = await fetch(`${targetUrl}/api/v1/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: user, password: pass }),
+      });
+      const data = (await r.json()) as { token?: string; error?: string };
+      if (!r.ok || !data.token) { setErr(data.error ?? "Login failed"); return; }
+      setToken(targetUrl, data.token);
+      onSuccess();
+      onClose();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally { setBusy(false); }
+  };
+
+  const inp = "w-full bg-zinc-950 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500";
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={onClose}>
+      <form
+        onSubmit={submit}
+        className="bg-zinc-900 border border-zinc-700 rounded-xl p-5 w-72 shadow-2xl space-y-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-semibold">Runtime Login</span>
+          <button type="button" onClick={onClose} className="text-zinc-500 hover:text-zinc-300 text-lg leading-none">×</button>
+        </div>
+        <div className="text-[10px] text-zinc-500 font-mono truncate">{targetUrl || "localhost"}</div>
+        <input value={user} onChange={(e) => setUser(e.target.value)} placeholder="Username" className={inp} autoFocus />
+        <input value={pass} onChange={(e) => setPass(e.target.value)} placeholder="Password" type="password" className={inp} />
+        {err && <div className="text-[11px] text-red-400">{err}</div>}
+        <button
+          type="submit"
+          disabled={busy || !user || !pass}
+          className="w-full py-1.5 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-xs font-medium"
+        >{busy ? "Logging in…" : "Login & Deploy"}</button>
+      </form>
+    </div>
+  );
+}
+
 // ── Header ─────────────────────────────────────────────────────────────────
 
 type HeaderProps = {
@@ -171,10 +234,11 @@ export function Header({ onHelp, onDemo, showJSON, onToggleJSON, onPreview }: He
   const targets      = useSyncExternalStore(subscribeTargets, getTargets);
   const activeTarget = useSyncExternalStore(subscribeTargets, getActiveTarget);
 
-  const [busy, setBusy]           = useState<"none" | "deploy" | "pull">("none");
-  const [msg, setMsg]             = useState("");
+  const [busy, setBusy]             = useState<"none" | "deploy" | "pull">("none");
+  const [msg, setMsg]               = useState("");
   const [showManage, setShowManage] = useState(false);
-  const fileInputRef              = useRef<HTMLInputElement>(null);
+  const [showLogin, setShowLogin]   = useState(false);
+  const fileInputRef                = useRef<HTMLInputElement>(null);
 
   // Keep apiBase + WebSocket in sync whenever the active target changes.
   useEffect(() => {
@@ -182,14 +246,21 @@ export function Header({ onHelp, onDemo, showJSON, onToggleJSON, onPreview }: He
     tagStoreClient.reconnectTo(activeTarget.url);
   }, [activeTarget.url]);
 
-  const deploy = async () => {
+  const doDeploy = async () => {
     setBusy("deploy"); setMsg("");
     try {
       const r = await fetch(`${activeTarget.url}/api/v1/project`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeader(activeTarget.url) },
         body: exportJSON(),
       });
+      if (r.status === 401) {
+        // Token missing or expired — show login modal
+        clearToken(activeTarget.url);
+        setBusy("none");
+        setShowLogin(true);
+        return;
+      }
       const data = (await r.json()) as { ok?: boolean; error?: string; datasources?: number; pages?: number };
       setMsg(r.ok ? `deployed → ${activeTarget.name} (${data.datasources} ds, ${data.pages} pg)` : `error: ${data.error}`);
     } catch (e) {
@@ -224,7 +295,10 @@ export function Header({ onHelp, onDemo, showJSON, onToggleJSON, onPreview }: He
   const pullFromRuntime = async () => {
     setBusy("pull");
     try {
-      const r = await fetch(`${activeTarget.url}/api/v1/project`);
+      const r = await fetch(`${activeTarget.url}/api/v1/project`, {
+        headers: { ...authHeader(activeTarget.url) },
+      });
+      if (r.status === 401) { setBusy("none"); setShowLogin(true); return; }
       if (!r.ok) throw new Error();
       const p = await r.json();
       if (p) { loadProject(p); setMsg(`pulled from ${activeTarget.name}`); }
@@ -299,7 +373,7 @@ export function Header({ onHelp, onDemo, showJSON, onToggleJSON, onPreview }: He
         className="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 shrink-0">
         {busy === "pull" ? "…" : "Pull"}
       </button>
-      <button onClick={deploy} disabled={busy !== "none"}
+      <button onClick={doDeploy} disabled={busy !== "none"}
         className="text-xs px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 font-medium shrink-0">
         {busy === "deploy" ? "deploying…" : "Deploy"}
       </button>
@@ -316,6 +390,13 @@ export function Header({ onHelp, onDemo, showJSON, onToggleJSON, onPreview }: He
         className="text-xs px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 font-mono shrink-0">?</button>
 
       {showManage && <ManageTargetsModal onClose={() => setShowManage(false)} />}
+      {showLogin && (
+        <RuntimeLoginModal
+          targetUrl={activeTarget.url}
+          onClose={() => setShowLogin(false)}
+          onSuccess={() => { setShowLogin(false); void doDeploy(); }}
+        />
+      )}
     </div>
   );
 }

@@ -842,6 +842,93 @@ function LEDProps({ setConfig, cfgStr, inp, label }: PropertiesPanelProps) {
   );
 }
 
+function ButtonStyleEditor({ setConfig, cfgStr, inp, label }: Pick<PropertiesPanelProps, "setConfig" | "cfgStr" | "inp" | "label">) {
+  const sel = (k: string, v: string, cur: string) => (
+    <button onClick={() => setConfig(k, v)}
+      className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${
+        cur === v ? "bg-blue-700 border-blue-600 text-white" : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+      }`}>{v}</button>
+  );
+
+  const variant  = cfgStr("btnVariant", "filled");
+  const color    = cfgStr("btnColor",   "blue");
+  const rounded  = cfgStr("btnRounded", "md");
+
+  const COLOR_SWATCHES: Record<string, string> = {
+    blue: "#3b82f6", green: "#22c55e", red: "#ef4444",
+    amber: "#f59e0b", zinc: "#71717a", purple: "#a855f7", orange: "#f97316", white: "#f4f4f5",
+  };
+
+  return (
+    <>
+      <div className="border-t border-zinc-800 pt-3">
+        <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Button Style</div>
+
+        <div className="space-y-2">
+          <div>
+            {label("Variant")}
+            <div className="flex flex-wrap gap-1">
+              {["filled","outlined","ghost","flat","industrial"].map((v) => sel("btnVariant", v, variant))}
+            </div>
+          </div>
+
+          <div>
+            {label("Color")}
+            <div className="flex flex-wrap gap-1.5 mt-0.5">
+              {Object.entries(COLOR_SWATCHES).map(([c, hex]) => (
+                <button key={c} title={c}
+                  onClick={() => setConfig("btnColor", c)}
+                  className={`w-6 h-6 rounded-full border-2 transition-all ${color === c ? "border-white scale-110" : "border-zinc-700 hover:border-zinc-400"}`}
+                  style={{ backgroundColor: hex }} />
+              ))}
+            </div>
+          </div>
+
+          <div>
+            {label("Corners")}
+            <div className="flex gap-1">
+              {["none","sm","md","lg","full"].map((r) => sel("btnRounded", r, rounded))}
+            </div>
+          </div>
+
+          <div>
+            {label("Icon (emoji or symbol)")}
+            <input value={cfgStr("icon", "")} onChange={(e) => setConfig("icon", e.target.value)}
+              placeholder="e.g. ▶ 🔴 ⚙" className={inp} />
+          </div>
+
+          {cfgStr("action", "write") === "write" && !cfgStr("momentary", "true") && (
+            <>
+              <div>
+                {label("Toggle ON color")}
+                <div className="flex flex-wrap gap-1.5 mt-0.5">
+                  {Object.entries(COLOR_SWATCHES).map(([c, hex]) => (
+                    <button key={c} title={c}
+                      onClick={() => setConfig("toggleOnColor", c)}
+                      className={`w-5 h-5 rounded-full border-2 transition-all ${cfgStr("toggleOnColor","green") === c ? "border-white scale-110" : "border-zinc-700"}`}
+                      style={{ backgroundColor: hex }} />
+                  ))}
+                </div>
+              </div>
+              <div>
+                {label("Toggle OFF color")}
+                <div className="flex flex-wrap gap-1.5 mt-0.5">
+                  {Object.entries(COLOR_SWATCHES).map(([c, hex]) => (
+                    <button key={c} title={c}
+                      onClick={() => setConfig("toggleOffColor", c)}
+                      className={`w-5 h-5 rounded-full border-2 transition-all ${cfgStr("toggleOffColor","zinc") === c ? "border-white scale-110" : "border-zinc-700"}`}
+                      style={{ backgroundColor: hex }} />
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function ButtonProps({ setConfig, cfgStr, cfgNum, cfgBool, inp, numInp, label, project }: PropertiesPanelProps) {
   return (
     <>
@@ -895,6 +982,7 @@ function ButtonProps({ setConfig, cfgStr, cfgNum, cfgBool, inp, numInp, label, p
           </div>
         </>
       )}
+      <ButtonStyleEditor setConfig={setConfig} cfgStr={cfgStr} inp={inp} label={label} />
     </>
   );
 }

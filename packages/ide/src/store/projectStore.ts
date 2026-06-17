@@ -216,6 +216,7 @@ type State = {
   removeFaceplate: (id: string) => void;
 
   loadProject: (p: Project) => void;
+  newProject: () => void;
   exportJSON: () => string;
 };
 
@@ -578,6 +579,17 @@ export const useProject = create<State>((set, get) => {
       set({
         project: p,
         activePageId: p.pages[0]?.id ?? "p1",
+        selectedWidgetId: null,
+        _past: [],
+        _future: [],
+        canUndo: false,
+        canRedo: false,
+      }),
+
+    newProject: () =>
+      set({
+        project: blankProject(),
+        activePageId: "p1",
         selectedWidgetId: null,
         _past: [],
         _future: [],

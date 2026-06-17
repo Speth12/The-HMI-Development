@@ -238,6 +238,37 @@ function LEDWidget({ w }: { w: Widget }) {
   );
 }
 
+// ── Button style system ────────────────────────────────────────────────────
+
+type BtnVariant = "filled" | "outlined" | "ghost" | "flat" | "industrial";
+type BtnColor   = "blue" | "green" | "red" | "amber" | "zinc" | "purple" | "orange" | "white";
+type BtnRounded = "none" | "sm" | "md" | "lg" | "full";
+
+const BTN_ROUNDED: Record<BtnRounded, string> = {
+  none: "rounded-none", sm: "rounded-sm", md: "rounded-md", lg: "rounded-lg", full: "rounded-full",
+};
+
+const BTN_COLORS: Record<BtnColor, Record<BtnVariant, string>> = {
+  blue:   { filled: "bg-blue-600 hover:bg-blue-500 text-white",                 outlined: "border-2 border-blue-500 text-blue-300 hover:bg-blue-900/30",   ghost: "text-blue-300 hover:bg-blue-900/40",      flat: "bg-blue-900/40 text-blue-300 hover:bg-blue-800/50",   industrial: "bg-gradient-to-b from-blue-500 to-blue-700 border border-blue-900 text-white shadow-inner" },
+  green:  { filled: "bg-emerald-600 hover:bg-emerald-500 text-white",           outlined: "border-2 border-emerald-500 text-emerald-300 hover:bg-emerald-900/30", ghost: "text-emerald-300 hover:bg-emerald-900/40", flat: "bg-emerald-900/40 text-emerald-300 hover:bg-emerald-800/50", industrial: "bg-gradient-to-b from-emerald-500 to-emerald-700 border border-emerald-900 text-white shadow-inner" },
+  red:    { filled: "bg-red-600 hover:bg-red-500 text-white",                   outlined: "border-2 border-red-500 text-red-300 hover:bg-red-900/30",       ghost: "text-red-300 hover:bg-red-900/40",        flat: "bg-red-900/40 text-red-300 hover:bg-red-800/50",       industrial: "bg-gradient-to-b from-red-500 to-red-700 border border-red-900 text-white shadow-inner" },
+  amber:  { filled: "bg-amber-500 hover:bg-amber-400 text-zinc-900 font-bold",  outlined: "border-2 border-amber-500 text-amber-300 hover:bg-amber-900/30",  ghost: "text-amber-300 hover:bg-amber-900/40",    flat: "bg-amber-900/40 text-amber-300 hover:bg-amber-800/50",  industrial: "bg-gradient-to-b from-amber-400 to-amber-600 border border-amber-900 text-zinc-900 shadow-inner" },
+  zinc:   { filled: "bg-zinc-700 hover:bg-zinc-600 text-zinc-100",              outlined: "border-2 border-zinc-500 text-zinc-300 hover:bg-zinc-800",        ghost: "text-zinc-300 hover:bg-zinc-800",          flat: "bg-zinc-800/60 text-zinc-300 hover:bg-zinc-700/60",    industrial: "bg-gradient-to-b from-zinc-500 to-zinc-700 border border-zinc-900 text-white shadow-inner" },
+  purple: { filled: "bg-purple-600 hover:bg-purple-500 text-white",             outlined: "border-2 border-purple-500 text-purple-300 hover:bg-purple-900/30", ghost: "text-purple-300 hover:bg-purple-900/40",  flat: "bg-purple-900/40 text-purple-300 hover:bg-purple-800/50", industrial: "bg-gradient-to-b from-purple-500 to-purple-700 border border-purple-900 text-white shadow-inner" },
+  orange: { filled: "bg-orange-500 hover:bg-orange-400 text-white",             outlined: "border-2 border-orange-500 text-orange-300 hover:bg-orange-900/30", ghost: "text-orange-300 hover:bg-orange-900/40",  flat: "bg-orange-900/40 text-orange-300 hover:bg-orange-800/50", industrial: "bg-gradient-to-b from-orange-400 to-orange-600 border border-orange-900 text-white shadow-inner" },
+  white:  { filled: "bg-white hover:bg-zinc-100 text-zinc-900",                 outlined: "border-2 border-zinc-300 text-zinc-100 hover:bg-zinc-800",         ghost: "text-zinc-200 hover:bg-zinc-800",          flat: "bg-white/10 text-zinc-200 hover:bg-white/20",          industrial: "bg-gradient-to-b from-zinc-200 to-zinc-400 border border-zinc-600 text-zinc-900 shadow-inner" },
+};
+
+function btnClass(config: Record<string, unknown> | undefined, activeOn = false): string {
+  const variant = ((config?.btnVariant as BtnVariant) ?? "filled");
+  const color   = ((config?.btnColor   as BtnColor)   ?? "blue");
+  const rounded = ((config?.btnRounded as BtnRounded) ?? "md");
+  const colorCls = BTN_COLORS[color]?.[variant] ?? BTN_COLORS.blue.filled;
+  const roundedCls = BTN_ROUNDED[rounded] ?? "rounded-md";
+  const activeCls = activeOn ? "ring-2 ring-current ring-offset-1 ring-offset-zinc-950" : "";
+  return `w-full h-full ${roundedCls} ${colorCls} text-sm font-medium transition-all active:scale-95 ${activeCls}`;
+}
+
 // ── write widgets ──────────────────────────────────────────────────────────
 
 function ButtonWidget({ w }: { w: Widget }) {
@@ -248,15 +279,22 @@ function ButtonWidget({ w }: { w: Widget }) {
   const momentary = (w.config?.momentary as boolean) ?? true;
   const onValue  = w.config?.onValue  ?? 1;
   const offValue = w.config?.offValue ?? 0;
+  const icon = w.config?.icon as string | undefined;
+
+  const content = (
+    <span className="flex items-center justify-center gap-1.5">
+      {icon && <span className="text-base leading-none">{icon}</span>}
+      {label}
+    </span>
+  );
 
   if (action === "navigate") {
     const targetPage = w.config?.navigateTo as string | undefined;
+    const navColor = (w.config?.btnColor as BtnColor) ?? "purple";
     return (
-      <button
-        className="w-full h-full rounded-md bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-sm font-medium transition-all"
-        onClick={() => targetPage && setActivePage(targetPage)}
-      >
-        {label}
+      <button className={btnClass({ ...w.config, btnColor: navColor })}
+              onClick={() => targetPage && setActivePage(targetPage)}>
+        {content}
       </button>
     );
   }
@@ -264,26 +302,27 @@ function ButtonWidget({ w }: { w: Widget }) {
   if (momentary) {
     return (
       <button
-        className="w-full h-full rounded-md bg-blue-600 hover:bg-blue-500 active:scale-95 text-sm font-medium transition-all"
+        className={btnClass(w.config)}
         onPointerDown={() => w.binding && writeTag(w.binding, onValue)}
         onPointerUp={()   => w.binding && writeTag(w.binding, offValue)}
         onPointerLeave={()=> w.binding && writeTag(w.binding, offValue)}
       >
-        {label}
+        {content}
       </button>
     );
   }
 
-  // Toggle mode — read current, invert
+  // Toggle mode — state-aware active styling
   const on = !!t.value;
+  const toggleColor: BtnColor = on
+    ? ((w.config?.toggleOnColor  as BtnColor) ?? "green")
+    : ((w.config?.toggleOffColor as BtnColor) ?? "zinc");
   return (
     <button
-      className={`w-full h-full rounded-md text-sm font-medium transition-all active:scale-95 ${
-        on ? "bg-emerald-600 hover:bg-emerald-500" : "bg-zinc-700 hover:bg-zinc-600"
-      }`}
+      className={btnClass({ ...w.config, btnColor: toggleColor }, on)}
       onClick={() => w.binding && writeTag(w.binding, on ? offValue : onValue)}
     >
-      {label}
+      {content}
     </button>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useProject, type DatasourceType, type CanvasResolution, type CanvasSnap } from "../store/projectStore";
 import { SYMBOL_PACKS, SYMBOLS } from "../data/symbols";
 import { Alarms, AlarmBadge } from "./Alarms";
@@ -14,166 +14,11 @@ import { MCPModal } from "./MCPModal";
 import { downloadGitFormat, importGitFormat } from "../store/gitFormat";
 import { apiBase } from "../store/runtimeTarget";
 
-type LeftTab = "project" | "page" | "tags" | "users" | "alarms" | "recipes" | "audit" | "udts" | "assets" | "faceplates";
-
-// ── Left panel: Project | Page | Tags | Library tabs ─────────────────────────
-
-export function LeftPanel({ width }: { width?: number }) {
-  const [tab, setTab] = useState<LeftTab>("project");
-  const [showMCP, setShowMCP] = useState(false);
-
-  const topTabs: { id: LeftTab; label: string }[] = [
-    { id: "project",   label: "Project"  },
-    { id: "page",      label: "Page"     },
-    { id: "tags",      label: "Tags"     },
-    { id: "udts",      label: "UDTs"     },
-    { id: "assets",    label: "Assets"   },
-    { id: "faceplates",label: "FP"       },
-  ];
-
-  const bottomTabs: { id: LeftTab; label: string }[] = [
-    { id: "users",   label: "Users"   },
-    { id: "alarms",  label: "Alarms"  },
-    { id: "recipes", label: "Recipes" },
-    { id: "audit",   label: "Audit"   },
-  ];
-
-  return (
-    <div className="shrink-0 border-r border-zinc-800 bg-zinc-900/50 flex flex-col min-h-0" style={{ width: width ?? 280 }}>
-      {/* Tab bar — scrollable top row */}
-      <div className="border-b border-zinc-800 shrink-0">
-        <div className="flex overflow-x-auto scrollbar-none">
-          {topTabs.map(({ id, label }) => (
-            <button
-              key={id}
-              onClick={() => setTab(id)}
-              className={`shrink-0 px-3 py-1.5 text-[10px] uppercase tracking-wider font-medium transition-colors whitespace-nowrap ${
-                tab === id
-                  ? "text-zinc-100 border-b-2 border-blue-500 -mb-px"
-                  : "text-zinc-500 hover:text-zinc-300"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <div className="flex border-t border-zinc-800/60">
-          {bottomTabs.map(({ id, label }) => (
-            <button
-              key={id}
-              onClick={() => setTab(id)}
-              className={`flex-1 py-1 text-[10px] uppercase tracking-wider font-medium transition-colors relative ${
-                tab === id
-                  ? "text-zinc-100 border-b-2 border-blue-500 -mb-px"
-                  : "text-zinc-500 hover:text-zinc-300"
-              }`}
-            >
-              {label}
-              {id === "alarms" && <AlarmBadgeInline />}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-auto min-h-0">
-        {tab === "project"    && <ProjectSettings onShowMCP={() => setShowMCP(true)} />}
-        {tab === "page"       && <PageSettings />}
-        {tab === "tags"       && <TagBrowser />}
-        {tab === "users"      && <Users />}
-        {tab === "alarms"     && <Alarms />}
-        {tab === "recipes"    && <Recipes />}
-        {tab === "audit"      && <AuditTrail />}
-        {tab === "udts"       && <UDTs />}
-        {tab === "assets"     && <AssetModel />}
-        {tab === "faceplates" && <Faceplates />}
-      </div>
-
-      {showMCP && <MCPModal onClose={() => setShowMCP(false)} />}
-    </div>
-  );
-}
-
-function AlarmBadgeInline() {
-  return <span className="inline-block ml-0.5"><AlarmBadge /></span>;
-}
-
-// ── Project Settings ──────────────────────────────────────────────────────────
-
-// ── Runtime deploy / import ───────────────────────────────────────────────
-
-type DeployState = "idle" | "busy" | "ok" | "err";
 type DSStatus = "connected" | "disconnected" | "unknown";
-
-function useDeployToRuntime(exportJSON: () => string) {
-  const [state, setState] = useState<DeployState>("idle");
-  const [msg, setMsg] = useState("");
-  const [showLogin, setShowLogin] = useState(false);
-  const jwtRef = useRef<string>("");
-
-  const deploy = async () => {
-    if (!jwtRef.current) { setShowLogin(true); return; }
-    setState("busy"); setMsg("");
-    try {
-      const r = await fetch(`${apiBase}/api/v1/project`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwtRef.current}` },
-        body: exportJSON(),
-      });
-      if (r.status === 401) { jwtRef.current = ""; setShowLogin(true); setState("idle"); return; }
-      if (!r.ok) throw new Error(await r.text());
-      setState("ok"); setMsg("Deployed");
-    } catch (e) { setState("err"); setMsg((e as Error).message); }
-    setTimeout(() => setState("idle"), 3000);
-  };
-
-  return { state, msg, showLogin, setShowLogin, jwtRef, deploy };
-}
-
-function RuntimeLoginModal({ onClose, onLogin }: { onClose: () => void; onLogin: (jwt: string) => void }) {
-  const [user, setUser] = useState("admin");
-  const [pass, setPass] = useState("");
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    setBusy(true); setErr("");
-    try {
-      const r = await fetch(`${apiBase}/api/v1/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: user, password: pass }),
-      });
-      if (!r.ok) throw new Error("Invalid credentials");
-      const data = await r.json() as { token: string };
-      onLogin(data.token);
-      onClose();
-    } catch (e) { setErr((e as Error).message); }
-    finally { setBusy(false); }
-  };
-
-  const inp = "w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-zinc-500";
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-5 w-72 space-y-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="text-sm font-semibold">Runtime Login</div>
-        <div className="text-[11px] text-zinc-500 font-mono truncate">{apiBase || "(local)"}</div>
-        <label className="block text-[11px] text-zinc-400">Username<input value={user} onChange={(e) => setUser(e.target.value)} className={`mt-0.5 ${inp}`} /></label>
-        <label className="block text-[11px] text-zinc-400">Password<input type="password" value={pass} onChange={(e) => setPass(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} className={`mt-0.5 ${inp}`} /></label>
-        {err && <div className="text-[11px] text-red-400">{err}</div>}
-        <div className="flex gap-2">
-          <button onClick={onClose} className="flex-1 py-1.5 text-xs rounded bg-zinc-700 hover:bg-zinc-600">Cancel</button>
-          <button onClick={submit} disabled={busy} className="flex-1 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-500 font-medium disabled:opacity-50">{busy ? "…" : "Login"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function useDSStatus(dsIds: string[]) {
   const [statuses, setStatuses] = useState<Record<string, DSStatus>>({});
-
   useEffect(() => {
-    if (!dsIds.length || !apiBase) return;
     const poll = async () => {
       const next: Record<string, DSStatus> = {};
       await Promise.all(dsIds.map(async (id) => {
@@ -186,21 +31,107 @@ function useDSStatus(dsIds: string[]) {
       }));
       setStatuses(next);
     };
-    poll();
-    const iv = setInterval(poll, 5000);
+    if (dsIds.length) poll();
+    const iv = setInterval(() => { if (dsIds.length) poll(); }, 5000);
     return () => clearInterval(iv);
   }, [dsIds.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
-
   return statuses;
 }
 
-function ProjectSettings({ onShowMCP }: { onShowMCP?: () => void }) {
-  const { project, exportJSON, loadProject, addDatasource, removeDatasource } = useProject();
-  const [showAddDS, setShowAddDS] = useState(false);
-  const [scannerDS, setScannerDS] = useState<{ id: string; label: string; type: string } | null>(null);
+// ── Collapsible tree section ──────────────────────────────────────────────────
 
-  const { state: deployState, msg: deployMsg, showLogin, setShowLogin, jwtRef, deploy } = useDeployToRuntime(exportJSON);
+function TreeSection({
+  label, count, badge, action, defaultOpen = false, children,
+}: {
+  label: string;
+  count?: number;
+  badge?: React.ReactNode;
+  action?: React.ReactNode;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="border-b border-zinc-800/60">
+      <div
+        className="flex items-center gap-1.5 px-3 py-1.5 cursor-pointer select-none hover:bg-zinc-800/30 group"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="text-zinc-600 text-[9px] w-3 shrink-0">{open ? "▾" : "▸"}</span>
+        <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-medium flex-1">{label}</span>
+        {badge}
+        {count !== undefined && count > 0 && (
+          <span className="text-[9px] text-zinc-600 bg-zinc-800 rounded px-1.5 py-0.5">{count}</span>
+        )}
+        {action && (
+          <span onClick={(e) => e.stopPropagation()}>{action}</span>
+        )}
+      </div>
+      {open && children}
+    </div>
+  );
+}
+
+// ── Main LeftPanel — project tree ─────────────────────────────────────────────
+
+export function LeftPanel({ width }: { width?: number }) {
+  const {
+    project, activePageId, setActivePage,
+    addPage, renamePage, removePage,
+    addDatasource, removeDatasource,
+    exportJSON, loadProject, newProject,
+  } = useProject();
+
+  const [showMCP,    setShowMCP]    = useState(false);
+  const [showAddDS,  setShowAddDS]  = useState(false);
+  const [scannerDS,  setScannerDS]  = useState<{ id: string; label: string; type: string } | null>(null);
+  const [renaming,   setRenaming]   = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [deploying,  setDeploying]  = useState(false);
+  const [deployMsg,  setDeployMsg]  = useState("");
+  const [autosaved,  setAutosaved]  = useState(false);
+
   const dsStatuses = useDSStatus(project.datasources.map((d) => d.id));
+
+  // Autosave indicator — flash for 2s after any project change
+  useEffect(() => {
+    setAutosaved(true);
+    const t = setTimeout(() => setAutosaved(false), 2000);
+    return () => clearTimeout(t);
+  }, [project]);
+
+  const setName = (name: string) => {
+    const p = JSON.parse(exportJSON());
+    loadProject({ ...p, name: name || undefined });
+  };
+
+  const setProp = (patch: Partial<typeof project>) => {
+    const p = JSON.parse(exportJSON());
+    loadProject({ ...p, ...patch });
+  };
+
+  const doDeploy = async () => {
+    setDeploying(true); setDeployMsg("");
+    try {
+      const r = await fetch(`${apiBase}/api/v1/project`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: exportJSON(),
+      });
+      const data = (await r.json()) as { ok?: boolean; error?: string; datasources?: number; pages?: number };
+      setDeployMsg(r.ok ? `✓ Deployed (${data.datasources ?? 0} ds, ${data.pages ?? 0} pg)` : `✗ ${data.error}`);
+    } catch (e) { setDeployMsg(`✗ ${(e as Error).message}`); }
+    finally { setDeploying(false); setTimeout(() => setDeployMsg(""), 4000); }
+  };
+
+  const exportHtml = () => {
+    const html = generateStandaloneHtml(project, "");
+    const blob = new Blob([html], { type: "text/html" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = `${(project.name ?? "project").replace(/\s+/g, "-")}.html`;
+    a.click(); URL.revokeObjectURL(url);
+  };
 
   const importGit = () => {
     const input = document.createElement("input");
@@ -213,13 +144,10 @@ function ProjectSettings({ onShowMCP }: { onShowMCP?: () => void }) {
         try {
           const raw = JSON.parse(reader.result as string) as Record<string, unknown>;
           if (raw._gitFormat) {
-            const filesMap = raw._files as Record<string, unknown>;
             const strMap: Record<string, string> = {};
-            for (const [k, v] of Object.entries(filesMap)) strMap[k] = JSON.stringify(v);
+            for (const [k, v] of Object.entries(raw._files as Record<string, unknown>)) strMap[k] = JSON.stringify(v);
             loadProject(importGitFormat(strMap));
-          } else {
-            loadProject(raw as Parameters<typeof loadProject>[0]);
-          }
+          } else { loadProject(raw as Parameters<typeof loadProject>[0]); }
         } catch (e) { alert(`Import failed: ${(e as Error).message}`); }
       };
       reader.readAsText(file);
@@ -227,191 +155,234 @@ function ProjectSettings({ onShowMCP }: { onShowMCP?: () => void }) {
     input.click();
   };
 
-  const inp = "w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-zinc-500";
-
-  const setName = (name: string) => {
-    const p = JSON.parse(exportJSON());
-    loadProject({ ...p, name: name || undefined });
+  const startRename = (id: string, name: string) => { setRenaming(id); setRenameDraft(name); };
+  const commitRename = () => {
+    if (renaming && renameDraft.trim()) renamePage(renaming, renameDraft.trim());
+    setRenaming(null);
   };
 
-  const setProp = (patch: Partial<typeof project>) => {
-    const p = JSON.parse(exportJSON());
-    loadProject({ ...p, ...patch });
-  };
-
-  const exportHtml = () => {
-    const html = generateStandaloneHtml(project, "");
-    const blob = new Blob([html], { type: "text/html" });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement("a");
-    a.href     = url;
-    a.download = `${(project.name ?? "project").replace(/\s+/g, "-")}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const inp = "bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-zinc-500";
 
   return (
-    <div className="p-3 space-y-4">
-      {/* Name */}
-      <div>
-        <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Project Name</div>
-        <input
-          value={project.name ?? ""}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Untitled"
-          className={inp}
-        />
-      </div>
+    <div className="shrink-0 border-r border-zinc-800 bg-zinc-900/50 flex flex-col min-h-0" style={{ width: width ?? 280 }}>
 
-      {/* Deploy */}
-      <div>
-        <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Deploy</div>
-        <div className="space-y-1">
+      {/* ── Project header ──────────────────────────────────────────── */}
+      <div className="px-3 pt-2.5 pb-2 border-b border-zinc-800 shrink-0 space-y-1.5">
+        <div className="flex items-center gap-1.5">
+          <input
+            value={project.name ?? ""}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Untitled Project"
+            className={`flex-1 min-w-0 ${inp}`}
+          />
           <button
-            onClick={deploy}
-            disabled={deployState === "busy"}
-            className={`w-full text-xs py-1.5 rounded text-left px-2 flex items-center gap-2 transition-colors disabled:opacity-50 ${
-              deployState === "ok" ? "bg-emerald-700 text-emerald-100" :
-              deployState === "err" ? "bg-red-800 text-red-100" :
-              "bg-blue-700 hover:bg-blue-600 text-white"
-            }`}
-          >
-            <span>{deployState === "busy" ? "⏳" : deployState === "ok" ? "✓" : deployState === "err" ? "✗" : "↑"}</span>
-            <span>{deployState === "idle" ? "Deploy to Runtime" : deployMsg || "Deploying…"}</span>
-          </button>
+            onClick={() => { if (window.confirm("Start a new blank project? Unsaved changes will be lost.")) newProject(); }}
+            title="New project"
+            className="shrink-0 text-[10px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200"
+          >New</button>
+        </div>
+        <div className="flex items-center justify-between min-h-[14px]">
+          {autosaved
+            ? <span className="text-[9px] text-emerald-500">✓ Autosaved</span>
+            : <span className="text-[9px] text-zinc-600">autosave on</span>
+          }
         </div>
       </div>
 
-      {/* Export / Import */}
-      <div>
-        <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Export / Import</div>
-        <div className="space-y-1">
-          <button
-            onClick={exportHtml}
-            className="w-full text-xs py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-left px-2 flex items-center gap-2"
-          >
-            <span>⬇</span>
-            <span>Export Standalone HTML</span>
-          </button>
-          <button
-            onClick={() => downloadGitFormat(project)}
-            className="w-full text-xs py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-left px-2 flex items-center gap-2"
-          >
-            <span>⬇</span>
-            <span>Export Git Format</span>
-          </button>
-          <button
-            onClick={importGit}
-            className="w-full text-xs py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-left px-2 flex items-center gap-2"
-          >
-            <span>⬆</span>
-            <span>Import Project / Git Format</span>
-          </button>
-          <button
-            onClick={() => onShowMCP?.()}
-            className="w-full text-xs py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-left px-2 flex items-center gap-2"
-          >
-            <span>⚙</span>
-            <span>MCP Setup</span>
-          </button>
-        </div>
-      </div>
+      {/* ── Tree body ───────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-auto min-h-0">
 
-      {/* Security */}
-      <div>
-        <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Security</div>
-        <div className="space-y-2">
-          <div>
-            <div className="text-[10px] text-zinc-500 mb-0.5">Operator PIN (blank = no lock)</div>
-            <input
-              type="password"
-              value={project.pin ?? ""}
-              onChange={(e) => setProp({ pin: e.target.value || undefined })}
-              placeholder="e.g. 1234"
-              className={inp}
-            />
-          </div>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={project.viewOnly ?? false}
-              onChange={(e) => setProp({ viewOnly: e.target.checked || undefined })}
-              className="accent-blue-500"
-            />
-            <span className="text-xs text-zinc-300">View-only (disable all writes)</span>
-          </label>
-        </div>
-      </div>
-
-      {/* Datasources */}
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500">Datasources</div>
-          <button
-            onClick={() => setShowAddDS(true)}
-            className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700"
-          >
-            + add
-          </button>
-        </div>
-        <div className="space-y-1">
-          {project.datasources.length === 0 && (
-            <div className="text-[11px] text-zinc-600 italic">No datasources yet.</div>
-          )}
-          {project.datasources.map((d) => {
-            const status = dsStatuses[d.id] ?? "unknown";
-            const dot = status === "connected" ? "bg-emerald-400" : status === "disconnected" ? "bg-red-500" : "bg-zinc-600";
-            const title = status === "connected" ? "Connected" : status === "disconnected" ? "Disconnected" : "Status unknown";
-            return (
-              <div key={d.id} className="flex items-center gap-2 bg-zinc-800/60 rounded px-2 py-1.5">
-                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} title={title} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-mono text-zinc-200 truncate">{d.id}</div>
-                  <div className="text-[10px] text-zinc-500">{d.type} · {d.label}</div>
-                </div>
+        {/* Pages */}
+        <TreeSection
+          label="Pages"
+          count={project.pages.length}
+          defaultOpen
+          action={
+            <button
+              onClick={() => addPage()}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400"
+            >+ Add</button>
+          }
+        >
+          <div className="pb-1">
+            {project.pages.map((pg) => (
+              <div
+                key={pg.id}
+                onClick={() => setActivePage(pg.id)}
+                className={`group flex items-center gap-2 px-4 py-1.5 cursor-pointer transition-colors ${
+                  pg.id === activePageId
+                    ? "bg-blue-600/20 text-zinc-100"
+                    : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+                }`}
+              >
+                <span className={`text-[8px] shrink-0 ${pg.id === activePageId ? "text-blue-400" : "text-zinc-600"}`}>●</span>
+                {renaming === pg.id ? (
+                  <input
+                    autoFocus
+                    value={renameDraft}
+                    onChange={(e) => setRenameDraft(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") setRenaming(null); }}
+                    className="flex-1 min-w-0 bg-zinc-800 border border-zinc-600 rounded px-1 text-xs focus:outline-none"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <span
+                    className="flex-1 text-xs truncate"
+                    onDoubleClick={(e) => { e.stopPropagation(); startRename(pg.id, pg.name); }}
+                  >{pg.name}</span>
+                )}
                 <button
-                  onClick={() => removeDatasource(d.id)}
-                  className="text-zinc-600 hover:text-red-400 text-xs shrink-0"
+                  onClick={(e) => { e.stopPropagation(); if (project.pages.length > 1) removePage(pg.id); }}
+                  className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 text-[11px] shrink-0 transition-opacity"
+                  title="Remove page"
                 >×</button>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        </TreeSection>
+
+        {/* Datasources */}
+        <TreeSection
+          label="Datasources"
+          count={project.datasources.length}
+          defaultOpen
+          action={
+            <button
+              onClick={() => setShowAddDS(true)}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400"
+            >+ Add</button>
+          }
+        >
+          <div className="pb-1">
+            {project.datasources.length === 0 && (
+              <div className="px-4 py-2 text-[11px] text-zinc-600 italic">No datasources yet</div>
+            )}
+            {project.datasources.map((d) => {
+              const st = dsStatuses[d.id] ?? "unknown";
+              const dot = st === "connected" ? "bg-emerald-400" : st === "disconnected" ? "bg-red-500" : "bg-zinc-600";
+              return (
+                <div key={d.id} className="group flex items-center gap-2 px-4 py-1.5">
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} title={st} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] text-zinc-200 truncate">{d.label}</div>
+                    <div className="text-[9px] text-zinc-600 font-mono">[{d.id}] {d.type}</div>
+                  </div>
+                  <button
+                    onClick={() => removeDatasource(d.id)}
+                    className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 text-[11px] shrink-0 transition-opacity"
+                  >×</button>
+                </div>
+              );
+            })}
+          </div>
+        </TreeSection>
+
+        {/* Tags */}
+        <TreeSection label="Tags">
+          <TagBrowser />
+        </TreeSection>
+
+        {/* Alarms */}
+        <TreeSection
+          label="Alarms"
+          count={project.alarmRules?.length}
+          badge={<AlarmBadge />}
+        >
+          <Alarms />
+        </TreeSection>
+
+        {/* Recipes */}
+        <TreeSection label="Recipes" count={project.recipes?.length}>
+          <Recipes />
+        </TreeSection>
+
+        {/* Users */}
+        <TreeSection label="Users" count={project.users?.length}>
+          <Users />
+        </TreeSection>
+
+        {/* Assets & Faceplates */}
+        <TreeSection label="Assets">
+          <AssetModel />
+        </TreeSection>
+
+        <TreeSection label="Faceplates" count={project.faceplates?.length}>
+          <Faceplates />
+        </TreeSection>
+
+        {/* UDTs */}
+        <TreeSection label="UDTs" count={project.udts?.length}>
+          <UDTs />
+        </TreeSection>
+
+        {/* Settings */}
+        <TreeSection label="Settings">
+          <div className="p-3 space-y-4">
+            {/* Security */}
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">Security</div>
+              <div className="space-y-2">
+                <div>
+                  <div className="text-[10px] text-zinc-500 mb-0.5">Operator PIN (blank = no lock)</div>
+                  <input
+                    type="password"
+                    value={project.pin ?? ""}
+                    onChange={(e) => setProp({ pin: e.target.value || undefined })}
+                    placeholder="e.g. 1234"
+                    className={`w-full ${inp}`}
+                  />
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={project.viewOnly ?? false}
+                    onChange={(e) => setProp({ viewOnly: e.target.checked || undefined })}
+                    className="accent-blue-500" />
+                  <span className="text-xs text-zinc-300">View-only (disable all writes)</span>
+                </label>
+              </div>
+            </div>
+            <CanvasSettings />
+            <SymbolPacksSettings />
+          </div>
+        </TreeSection>
+
+        {/* Audit */}
+        <TreeSection label="Audit">
+          <AuditTrail />
+        </TreeSection>
+
       </div>
 
-      {/* Canvas Settings */}
-      <CanvasSettings />
+      {/* ── Bottom action bar ────────────────────────────────────────── */}
+      <div className="border-t border-zinc-800 p-2 space-y-1 shrink-0">
+        {deployMsg && <div className="text-[10px] text-zinc-400 truncate px-1">{deployMsg}</div>}
+        <button
+          onClick={doDeploy}
+          disabled={deploying}
+          className="w-full text-xs py-1.5 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 font-medium flex items-center justify-center gap-2"
+        >
+          <span>{deploying ? "⏳" : "↑"}</span>
+          {deploying ? "Deploying…" : "Deploy to Runtime"}
+        </button>
+        <div className="grid grid-cols-3 gap-1">
+          <button onClick={exportHtml} className="text-[10px] py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400" title="Export standalone HTML">⬇ HTML</button>
+          <button onClick={() => downloadGitFormat(project)} className="text-[10px] py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400" title="Export Git format">⬇ Git</button>
+          <button onClick={importGit} className="text-[10px] py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400" title="Import project">⬆ Import</button>
+        </div>
+        <button onClick={() => setShowMCP(true)} className="w-full text-[10px] py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-500">⚙ MCP Setup</button>
+      </div>
 
-      {/* Symbol Packs */}
-      <SymbolPacksSettings />
-
-      {/* Alarm Rules */}
-      <AlarmRulesEditor />
-
+      {/* Modals */}
       {showAddDS && (
         <AddDatasourceModal
           onClose={() => setShowAddDS(false)}
-          onAdd={(ds) => {
-            addDatasource(ds);
-            setShowAddDS(false);
-            setScannerDS({ id: ds.id, label: ds.label, type: ds.type });
-          }}
+          onAdd={(ds) => { addDatasource(ds); setShowAddDS(false); setScannerDS({ id: ds.id, label: ds.label, type: ds.type }); }}
         />
       )}
       {scannerDS && (
-        <TagScannerModal
-          dsId={scannerDS.id}
-          dsLabel={scannerDS.label}
-          dsType={scannerDS.type}
-          onClose={() => setScannerDS(null)}
-        />
+        <TagScannerModal dsId={scannerDS.id} dsLabel={scannerDS.label} dsType={scannerDS.type} onClose={() => setScannerDS(null)} />
       )}
-      {showLogin && (
-        <RuntimeLoginModal
-          onClose={() => setShowLogin(false)}
-          onLogin={(jwt) => { jwtRef.current = jwt; deploy(); }}
-        />
-      )}
+      {showMCP && <MCPModal onClose={() => setShowMCP(false)} />}
     </div>
   );
 }
@@ -1087,7 +1058,7 @@ export function AddDatasourceModal({ onClose, onAdd }: {
     setTesting(true); setTestResult(null);
     const { type: dsType, config } = buildPayload();
     try {
-      const r = await fetch("/api/v1/datasources/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: "test", type: dsType, label: "test", config }) });
+      const r = await fetch(`${apiBase}/api/v1/datasources/test`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: "test", type: dsType, label: "test", config }) });
       const data = (await r.json()) as { connected: boolean; lastError?: string; tagCount?: number };
       setTestResult(data.connected ? { ok: true, msg: `Connected${data.tagCount ? ` · ${data.tagCount} tags` : ""}` } : { ok: false, msg: data.lastError ?? "Connection failed" });
     } catch (e) { setTestResult({ ok: false, msg: (e as Error).message }); }
