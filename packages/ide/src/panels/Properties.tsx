@@ -94,6 +94,95 @@ export function Properties() {
         <input value={cfgStr("label")} onChange={(e) => setConfig("label", e.target.value)} className={inp} />
       </div>
 
+      {/* Appearance — all widget types */}
+      <div className="border-t border-zinc-800 pt-3 space-y-2">
+        <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">Appearance</div>
+
+        {/* Background */}
+        <div>
+          {label("Background")}
+          <div className="flex gap-1.5 flex-wrap">
+            {["default", "transparent", "custom"].map((opt) => {
+              const cur = cfgStr("bgColor", "");
+              const active = opt === "transparent" ? cur === "transparent" || cur === "none"
+                           : opt === "default"     ? cur === ""
+                           : cur !== "" && cur !== "transparent" && cur !== "none";
+              return (
+                <button key={opt}
+                  onClick={() => {
+                    if (opt === "default")      setConfig("bgColor", "");
+                    if (opt === "transparent")  setConfig("bgColor", "transparent");
+                    if (opt === "custom")       setConfig("bgColor", "#1c1c1e");
+                  }}
+                  className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${
+                    active ? "bg-blue-700 border-blue-600 text-white" : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+                  }`}>{opt}</button>
+              );
+            })}
+            {cfgStr("bgColor","") !== "" && cfgStr("bgColor","") !== "transparent" && cfgStr("bgColor","") !== "none" && (
+              <div className="flex gap-1 items-center flex-1 min-w-0">
+                <input type="color" value={cfgStr("bgColor","#1c1c1e")}
+                  onChange={(e) => setConfig("bgColor", e.target.value)}
+                  className="h-7 w-8 rounded border border-zinc-700 bg-zinc-900 cursor-pointer shrink-0" />
+                <input value={cfgStr("bgColor","")} onChange={(e) => setConfig("bgColor", e.target.value)}
+                  className={`${inp} font-mono text-[10px]`} />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Border */}
+        <div>
+          {label("Border color")}
+          <div className="flex gap-1.5 flex-wrap">
+            {["default", "none", "custom"].map((opt) => {
+              const cur = cfgStr("borderColor", "");
+              const active = opt === "none"    ? cur === "transparent" || cur === "none"
+                           : opt === "default" ? cur === ""
+                           : cur !== "" && cur !== "transparent" && cur !== "none";
+              return (
+                <button key={opt}
+                  onClick={() => {
+                    if (opt === "default") setConfig("borderColor", "");
+                    if (opt === "none")    setConfig("borderColor", "transparent");
+                    if (opt === "custom")  setConfig("borderColor", "#3f3f46");
+                  }}
+                  className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${
+                    active ? "bg-blue-700 border-blue-600 text-white" : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+                  }`}>{opt}</button>
+              );
+            })}
+            {cfgStr("borderColor","") !== "" && cfgStr("borderColor","") !== "transparent" && cfgStr("borderColor","") !== "none" && (
+              <div className="flex gap-1 items-center flex-1 min-w-0">
+                <input type="color" value={cfgStr("borderColor","#3f3f46")}
+                  onChange={(e) => setConfig("borderColor", e.target.value)}
+                  className="h-7 w-8 rounded border border-zinc-700 bg-zinc-900 cursor-pointer shrink-0" />
+                <input value={cfgStr("borderColor","")} onChange={(e) => setConfig("borderColor", e.target.value)}
+                  className={`${inp} font-mono text-[10px]`} />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Quality indicator toggle */}
+        <label className="flex items-center gap-2 cursor-pointer pt-0.5">
+          <input type="checkbox"
+            checked={cfgBool("showQuality", true)}
+            onChange={(e) => setConfig("showQuality", e.target.checked)}
+            className="accent-blue-500" />
+          <span className="text-xs text-zinc-300">Show quality indicator (Good / Bad)</span>
+        </label>
+
+        {/* No padding toggle */}
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox"
+            checked={cfgBool("noPadding", false)}
+            onChange={(e) => setConfig("noPadding", e.target.checked)}
+            className="accent-blue-500" />
+          <span className="text-xs text-zinc-300">Remove padding</span>
+        </label>
+      </div>
+
       {/* Per-widget panel — looked up from the registry */}
       {WidgetPanel && <WidgetPanel {...panelProps} />}
     </div>

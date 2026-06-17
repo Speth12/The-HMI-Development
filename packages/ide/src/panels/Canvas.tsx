@@ -678,7 +678,7 @@ export function Canvas() {
                 onDragStart={onDragStart}
                 onClick={onClick}
                 onContextMenu={onContextMenu}
-                className={`relative rounded-lg ${
+                className={`group relative rounded-lg ${
                   selected
                     ? selectedIds.length > 1
                       ? "ring-2 ring-violet-400"
@@ -726,7 +726,7 @@ export function Canvas() {
                 )}
 
                 {w.binding && (
-                  <div className="absolute bottom-0 left-0 right-0 text-[9px] font-mono text-zinc-600 px-1.5 truncate pointer-events-none">
+                  <div className="absolute bottom-0 left-0 right-0 text-[9px] font-mono text-zinc-500 px-1.5 truncate pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
                     {w.binding}
                   </div>
                 )}

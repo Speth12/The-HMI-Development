@@ -108,9 +108,30 @@ export function KeypadModal({
 // ── shared Frame ───────────────────────────────────────────────────────────
 
 function Frame({ w, children }: { w: Widget; children: React.ReactNode }) {
-  const label = w.config?.label as string | undefined;
+  const label      = w.config?.label as string | undefined;
+  const bgColor    = w.config?.bgColor    as string | undefined;
+  const borderColor= w.config?.borderColor as string | undefined;
+  const noPadding  = w.config?.noPadding  as boolean | undefined;
+
+  // "none" / "transparent" = fully transparent background & no border
+  const isTransparent = bgColor === "none" || bgColor === "transparent";
+
+  const style: React.CSSProperties = {
+    backgroundColor: isTransparent ? "transparent" : (bgColor ?? undefined),
+    borderColor:     isTransparent ? "transparent" : (borderColor ?? undefined),
+  };
+
   return (
-    <div className="h-full w-full rounded-lg bg-zinc-900/80 border border-zinc-800 p-3 flex flex-col gap-1 select-none">
+    <div
+      className={`h-full w-full rounded-lg flex flex-col gap-1 select-none ${
+        isTransparent
+          ? "border-transparent"
+          : bgColor
+          ? "border"
+          : "bg-zinc-900/80 border border-zinc-800"
+      } ${noPadding ? "" : "p-3"}`}
+      style={style}
+    >
       {label ? (
         <div className="text-[10px] uppercase tracking-wider text-zinc-500 truncate shrink-0">{label}</div>
       ) : null}
@@ -199,7 +220,9 @@ function GaugeWidget({ w }: { w: Widget }) {
           {w.config?.unit ? ` ${w.config.unit as string}` : ""}
         </text>
       </svg>
-      <div className={`text-[9px] text-center ${qualityColor[t.quality] ?? "text-zinc-600"}`}>{t.quality}</div>
+      {(w.config?.showQuality ?? true) && (
+        <div className={`text-[9px] text-center ${qualityColor[t.quality] ?? "text-zinc-600"}`}>{t.quality}</div>
+      )}
     </div>
   );
 }
@@ -212,7 +235,9 @@ function NumericDisplayWidget({ w }: { w: Widget }) {
         {fmt(t.value)}
         {w.config?.unit ? <span className="text-base text-zinc-500 ml-1">{w.config.unit as string}</span> : null}
       </div>
-      <div className={`text-[10px] mt-1 ${qualityColor[t.quality] ?? "text-zinc-500"}`}>{t.quality}</div>
+      {(w.config?.showQuality ?? true) && (
+        <div className={`text-[10px] mt-1 ${qualityColor[t.quality] ?? "text-zinc-500"}`}>{t.quality}</div>
+      )}
     </div>
   );
 }
@@ -424,7 +449,9 @@ function TankWidget({ w }: { w: Widget }) {
         {(w.config?.unit as string | undefined) && (
           <div className="text-[10px] text-zinc-500">{w.config!.unit as string}</div>
         )}
-        <div className={`text-[9px] mt-1 ${qualityColor[t.quality] ?? "text-zinc-500"}`}>{t.quality}</div>
+        {(w.config?.showQuality ?? true) && (
+          <div className={`text-[9px] mt-1 ${qualityColor[t.quality] ?? "text-zinc-500"}`}>{t.quality}</div>
+        )}
       </div>
     </div>
   );
@@ -464,7 +491,9 @@ function SetpointWidget({ w }: { w: Widget }) {
       />
       <div className="flex justify-between text-[9px] text-zinc-600">
         <span>{min}</span>
-        <span className={qualityColor[t.quality] ?? "text-zinc-600"}>{t.quality}</span>
+        {(w.config?.showQuality ?? true) && (
+          <span className={qualityColor[t.quality] ?? "text-zinc-600"}>{t.quality}</span>
+        )}
         <span>{max}</span>
       </div>
     </div>
