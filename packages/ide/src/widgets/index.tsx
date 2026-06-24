@@ -1,5 +1,5 @@
 // Widget renderers — read, write, and trend support.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Widget, Dynamic } from "../store/projectStore";
 import { useProject } from "../store/projectStore";
@@ -105,15 +105,54 @@ export function KeypadModal({
   );
 }
 
+// ── Script expression evaluator ───────────────────────────────────────────
+
+function evalExpression(expr: string, value: unknown): unknown {
+  try {
+    return new Function("value", `"use strict"; return (${expr})`)(value);
+  } catch {
+    return false;
+  }
+}
+
+// Context carries script-dynamic overrides (config key → value) from DynamicsApplicator into Frame
+const ScriptOverrideContext = createContext<Record<string, unknown>>({});
+
+// ── Typography helper ──────────────────────────────────────────────────────
+
+const FONT_SIZE_MAP: Record<string, string> = {
+  xs: "0.75rem", sm: "0.875rem", base: "1rem", lg: "1.125rem",
+  xl: "1.25rem", "2xl": "1.5rem", "3xl": "1.875rem", "4xl": "2.25rem",
+};
+const FONT_FAMILY_MAP: Record<string, string> = {
+  mono: "ui-monospace, monospace",
+  sans: "ui-sans-serif, system-ui, sans-serif",
+  serif: "ui-serif, Georgia, serif",
+};
+
+function fontStyle(config: Record<string, unknown> | undefined): React.CSSProperties {
+  if (!config) return {};
+  return {
+    fontFamily: FONT_FAMILY_MAP[config.fontFamily as string] ?? undefined,
+    fontSize:   FONT_SIZE_MAP[config.fontSize as string] ?? undefined,
+    fontWeight: config.fontBold    ? "bold"   : undefined,
+    fontStyle:  config.fontItalic  ? "italic" : undefined,
+    textDecoration: config.fontUnderline ? "underline" : undefined,
+    textAlign:  (config.textAlign as React.CSSProperties["textAlign"]) ?? undefined,
+    color:      (config.textColor as string) || undefined,
+  };
+}
+
 // ── shared Frame ───────────────────────────────────────────────────────────
 
 function Frame({ w, children }: { w: Widget; children: React.ReactNode }) {
+  const overrides  = useContext(ScriptOverrideContext);
   const label      = w.config?.label as string | undefined;
-  const bgColor    = w.config?.bgColor    as string | undefined;
-  const borderColor= w.config?.borderColor as string | undefined;
+  const bgColor    = (overrides.bgColor      as string | undefined) ?? (w.config?.bgColor    as string | undefined);
+  const borderColor= (overrides.borderColor  as string | undefined) ?? (w.config?.borderColor as string | undefined);
+  const textColor  = (overrides.textColor    as string | undefined) ?? (w.config?.textColor  as string | undefined);
   const noPadding  = w.config?.noPadding  as boolean | undefined;
 
-  // "none" / "transparent" = fully transparent background & no border
   const isTransparent = bgColor === "none" || bgColor === "transparent";
 
   const style: React.CSSProperties = {
@@ -135,7 +174,7 @@ function Frame({ w, children }: { w: Widget; children: React.ReactNode }) {
       {label ? (
         <div className="text-[10px] uppercase tracking-wider text-zinc-500 truncate shrink-0">{label}</div>
       ) : null}
-      <div className="flex-1 min-h-0">{children}</div>
+      <div className="flex-1 min-h-0" style={{ ...fontStyle(w.config), color: textColor ?? undefined }}>{children}</div>
     </div>
   );
 }
@@ -244,7 +283,14 @@ function NumericDisplayWidget({ w }: { w: Widget }) {
 
 function TextDisplayWidget({ w }: { w: Widget }) {
   const t = useTag(w.binding);
-  return <div className="text-lg break-words h-full flex items-center">{fmt(t.value)}</div>;
+  const staticText = w.config?.staticText as string | undefined;
+  const align = (w.config?.textAlign as string) || "left";
+  const justifyCls = align === "center" ? "justify-center" : align === "right" ? "justify-end" : "justify-start";
+  return (
+    <div className={`break-words h-full flex items-center ${justifyCls} text-lg`}>
+      {staticText ?? fmt(t.value)}
+    </div>
+  );
 }
 
 function LEDWidget({ w }: { w: Widget }) {
@@ -1084,6 +1130,7 @@ function DynamicsApplicator({ w, children }: { w: Widget; children: React.ReactN
   let rotationDeg = 0;
   let disabled = false;
   let ringColor: string | undefined;
+  const scriptOverrides: Record<string, unknown> = {};
 
   for (const d of dynamics) {
     const rawVal = d.binding ? tagVals[d.binding]?.value : undefined;
@@ -1093,6 +1140,16 @@ function DynamicsApplicator({ w, children }: { w: Widget; children: React.ReactN
     if (d.kind === "disable" && d.binding && truthy) disabled = true;
     if (d.kind === "colorFill" && d.binding) {
       ringColor = truthy ? (d.trueColor ?? "#22c55e") : (d.falseColor ?? "#3f3f46");
+    }
+    if (d.kind === "script" && d.binding && d.targetProp) {
+      const result = evalExpression(d.expression ?? "value", rawVal);
+      const truthy2 = !!result;
+      if (d.targetProp === "visible") {
+        if (!truthy2) hidden = true;
+      } else {
+        const applied = truthy2 ? (d.trueValue ?? "") : (d.falseValue ?? "");
+        if (applied !== "") scriptOverrides[d.targetProp] = applied;
+      }
     }
     if (d.kind === "rotation" && d.binding) {
       const num = typeof rawVal === "number" ? rawVal : 0;
@@ -1112,27 +1169,29 @@ function DynamicsApplicator({ w, children }: { w: Widget; children: React.ReactN
   const handleReleased = useCallback(() => dynamics.filter((d) => d.kind === "onReleased").forEach((d) => execDynAction(d, tagVals, setActivePage)), [dynamics, tagVals, setActivePage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div
-      className="relative w-full h-full"
-      style={{
-        transform: rotationDeg ? `rotate(${rotationDeg.toFixed(1)}deg)` : undefined,
-        opacity: blinkDyn && !blinkVisible ? 0 : 1,
-        pointerEvents: disabled ? "none" : undefined,
-        cursor: (hasClick || hasPressed) ? "pointer" : undefined,
-        outline: ringColor ? `2px solid ${ringColor}` : undefined,
-        outlineOffset: "-2px",
-        borderRadius: "0.5rem",
-        transition: "opacity 0.05s, outline-color 0.2s",
-      }}
-      onClick={hasClick ? handleClick : undefined}
-      onPointerDown={hasPressed ? handlePressed : undefined}
-      onPointerUp={hasReleased ? handleReleased : undefined}
-    >
-      {disabled && (
-        <div className="absolute inset-0 z-10 bg-zinc-950/50 rounded-lg pointer-events-none" />
-      )}
-      {children}
-    </div>
+    <ScriptOverrideContext.Provider value={scriptOverrides}>
+      <div
+        className="relative w-full h-full"
+        style={{
+          transform: rotationDeg ? `rotate(${rotationDeg.toFixed(1)}deg)` : undefined,
+          opacity: blinkDyn && !blinkVisible ? 0 : 1,
+          pointerEvents: disabled ? "none" : undefined,
+          cursor: (hasClick || hasPressed) ? "pointer" : undefined,
+          outline: ringColor ? `2px solid ${ringColor}` : undefined,
+          outlineOffset: "-2px",
+          borderRadius: "0.5rem",
+          transition: "opacity 0.05s, outline-color 0.2s",
+        }}
+        onClick={hasClick ? handleClick : undefined}
+        onPointerDown={hasPressed ? handlePressed : undefined}
+        onPointerUp={hasReleased ? handleReleased : undefined}
+      >
+        {disabled && (
+          <div className="absolute inset-0 z-10 bg-zinc-950/50 rounded-lg pointer-events-none" />
+        )}
+        {children}
+      </div>
+    </ScriptOverrideContext.Provider>
   );
 }
 

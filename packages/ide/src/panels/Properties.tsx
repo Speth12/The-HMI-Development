@@ -27,17 +27,72 @@ function LiveTagPreview({ binding }: { binding?: string }) {
   );
 }
 
+function PageProperties({ page }: { page: { id: string; name: string; backgroundColor?: string; script?: string } }) {
+  const { updatePage } = useProject();
+  const inp = "w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-zinc-500";
+  return (
+    <div className="p-3 space-y-4 overflow-auto">
+      <div className="text-[10px] uppercase tracking-wider text-zinc-500 pb-1 border-b border-zinc-800">Page Properties</div>
+
+      <div>
+        <div className="text-[10px] text-zinc-500 mb-0.5">Page name</div>
+        <input value={page.name} onChange={(e) => updatePage(page.id, { name: e.target.value })} className={inp} />
+      </div>
+
+      <div>
+        <div className="text-[10px] text-zinc-500 mb-1">Background color</div>
+        <div className="flex gap-1.5 flex-wrap mb-1.5">
+          {["default", "custom"].map((opt) => {
+            const cur = page.backgroundColor ?? "";
+            const active = opt === "default" ? cur === "" : cur !== "";
+            return (
+              <button key={opt}
+                onClick={() => updatePage(page.id, { backgroundColor: opt === "default" ? "" : "#111111" })}
+                className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${
+                  active ? "bg-blue-700 border-blue-600 text-white" : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+                }`}>{opt}</button>
+            );
+          })}
+        </div>
+        {(page.backgroundColor ?? "") !== "" && (
+          <div className="flex gap-1.5 items-center">
+            <input type="color" value={page.backgroundColor ?? "#111111"}
+              onChange={(e) => updatePage(page.id, { backgroundColor: e.target.value })}
+              className="h-7 w-8 rounded border border-zinc-700 bg-zinc-900 cursor-pointer shrink-0" />
+            <input value={page.backgroundColor ?? ""} onChange={(e) => updatePage(page.id, { backgroundColor: e.target.value })}
+              className={`${inp} font-mono text-[10px]`} />
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-zinc-800 pt-3">
+        <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Page Script</div>
+        <div className="text-[10px] text-zinc-600 mb-1.5 leading-relaxed">
+          Variables available: <code className="bg-zinc-800 px-0.5 rounded text-zinc-400">tags</code> object with tag paths as keys.<br />
+          Example: <code className="bg-zinc-800 px-0.5 rounded text-zinc-400">{"// tags['rest:path'] > 5000"}</code>
+        </div>
+        <textarea
+          value={page.script ?? ""}
+          onChange={(e) => updatePage(page.id, { script: e.target.value })}
+          placeholder={"// Page-level script runs when tags update\n// Example:\n// if (tags['rest:ds:path'] > 100) { ... }"}
+          rows={8}
+          className={`${inp} font-mono text-[10px] resize-y`}
+        />
+        <div className="text-[10px] text-zinc-600 mt-1">Page scripting executes in runtime — logic here affects all widgets on this page.</div>
+      </div>
+    </div>
+  );
+}
+
 export function Properties() {
   const { project, activePageId, selectedWidgetId, updateWidget } = useProject();
   const page = project.pages.find((p) => p.id === activePageId);
   const w = page?.widgets.find((x) => x.id === selectedWidgetId);
 
   if (!w || !page) {
-    return (
-      <div className="p-3 text-xs text-zinc-500">
-        Select a widget on the canvas to edit its properties.
-      </div>
-    );
+    return page
+      ? <PageProperties page={page} />
+      : <div className="p-3 text-xs text-zinc-500">No page selected.</div>;
   }
 
   const setConfig = (k: string, v: unknown) =>
@@ -181,6 +236,111 @@ export function Properties() {
             className="accent-blue-500" />
           <span className="text-xs text-zinc-300">Remove padding</span>
         </label>
+      </div>
+
+      {/* Typography — all widget types */}
+      <div className="border-t border-zinc-800 pt-3 space-y-2">
+        <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">Typography</div>
+
+        {/* Font family */}
+        <div>
+          {label("Font")}
+          <div className="flex gap-1 flex-wrap">
+            {(["default", "mono", "sans", "serif"] as const).map((f) => {
+              const cur = cfgStr("fontFamily", "");
+              const active = f === "default" ? cur === "" : cur === f;
+              const fontCls = f === "mono" ? "font-mono" : f === "sans" ? "font-sans" : f === "serif" ? "font-serif" : "";
+              return (
+                <button key={f} onClick={() => setConfig("fontFamily", f === "default" ? "" : f)}
+                  className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${fontCls} ${
+                    active ? "bg-blue-700 border-blue-600 text-white" : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+                  }`}>{f === "default" ? "default" : f}</button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Font size */}
+        <div>
+          {label("Size")}
+          <div className="flex gap-1 flex-wrap">
+            {(["xs", "sm", "base", "lg", "xl", "2xl", "3xl", "4xl"] as const).map((s) => {
+              const cur = cfgStr("fontSize", "");
+              const active = s === "base" ? cur === "" || cur === "base" : cur === s;
+              return (
+                <button key={s} onClick={() => setConfig("fontSize", s === "base" ? "" : s)}
+                  className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${
+                    active ? "bg-blue-700 border-blue-600 text-white" : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+                  }`}>{s}</button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Style toggles + alignment */}
+        <div className="flex gap-3 items-center flex-wrap">
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input type="checkbox" checked={cfgBool("fontBold", false)}
+              onChange={(e) => setConfig("fontBold", e.target.checked)}
+              className="accent-blue-500" />
+            <span className="text-xs text-zinc-300 font-bold">Bold</span>
+          </label>
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input type="checkbox" checked={cfgBool("fontItalic", false)}
+              onChange={(e) => setConfig("fontItalic", e.target.checked)}
+              className="accent-blue-500" />
+            <span className="text-xs text-zinc-300 italic">Italic</span>
+          </label>
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input type="checkbox" checked={cfgBool("fontUnderline", false)}
+              onChange={(e) => setConfig("fontUnderline", e.target.checked)}
+              className="accent-blue-500" />
+            <span className="text-xs text-zinc-300 underline">Underline</span>
+          </label>
+        </div>
+
+        {/* Text align */}
+        <div>
+          {label("Align")}
+          <div className="flex gap-1">
+            {(["left", "center", "right"] as const).map((a) => {
+              const cur = cfgStr("textAlign", "");
+              const active = a === "left" ? cur === "" || cur === "left" : cur === a;
+              return (
+                <button key={a} onClick={() => setConfig("textAlign", a === "left" ? "" : a)}
+                  className={`px-2.5 py-0.5 rounded text-[10px] border transition-colors ${
+                    active ? "bg-blue-700 border-blue-600 text-white" : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+                  }`}>{a === "left" ? "⬛ Left" : a === "center" ? "⬛ Center" : "⬛ Right"}</button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Text color */}
+        <div>
+          {label("Text color")}
+          <div className="flex gap-1.5 items-center flex-wrap">
+            {["default", "custom"].map((opt) => {
+              const cur = cfgStr("textColor", "");
+              const active = opt === "default" ? cur === "" : cur !== "";
+              return (
+                <button key={opt} onClick={() => setConfig("textColor", opt === "default" ? "" : "#e4e4e7")}
+                  className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${
+                    active ? "bg-blue-700 border-blue-600 text-white" : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+                  }`}>{opt}</button>
+              );
+            })}
+            {cfgStr("textColor", "") !== "" && (
+              <div className="flex gap-1 items-center flex-1 min-w-0">
+                <input type="color" value={cfgStr("textColor", "#e4e4e7")}
+                  onChange={(e) => setConfig("textColor", e.target.value)}
+                  className="h-7 w-8 rounded border border-zinc-700 bg-zinc-900 cursor-pointer shrink-0" />
+                <input value={cfgStr("textColor", "")} onChange={(e) => setConfig("textColor", e.target.value)}
+                  className={`${inp} font-mono text-[10px]`} />
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Per-widget panel — looked up from the registry */}
@@ -627,12 +787,13 @@ function ThresholdEditor({ w, setConfig, inp, numInp, label }: {
 
 // ── Dynamics editor ───────────────────────────────────────────────────────
 
-const DYN_KINDS: { kind: Dynamic["kind"]; label: string; group: "property" | "action" }[] = [
-  { kind: "visibility", label: "Visibility",  group: "property" },
+const DYN_KINDS: { kind: Dynamic["kind"]; label: string; group: "property" | "action" | "script" }[] = [
+  { kind: "visibility", label: "Visibility",   group: "property" },
   { kind: "colorFill",  label: "Color / Fill", group: "property" },
   { kind: "blink",      label: "Blink",        group: "property" },
   { kind: "rotation",   label: "Rotation",     group: "property" },
   { kind: "disable",    label: "Disable",      group: "property" },
+  { kind: "script",     label: "Script / Expression", group: "script" },
   { kind: "onClick",    label: "On Click",     group: "action"   },
   { kind: "onPressed",  label: "On Pressed",   group: "action"   },
   { kind: "onReleased", label: "On Released",  group: "action"   },
@@ -747,6 +908,59 @@ function DynamicCard({ d, onUpdate, onRemove, pages, inp, numInp }: {
             </>
           )}
 
+          {/* script dynamic */}
+          {d.kind === "script" && (
+            <div className="space-y-2">
+              <div>
+                <div className="text-[10px] text-zinc-500 mb-0.5">Tag binding</div>
+                <input value={d.binding ?? ""} onChange={(e) => onUpdate({ binding: e.target.value || undefined })}
+                  placeholder="ds:tagPath" className={`${inp} font-mono text-[10px]`} />
+                <LiveTagPreview binding={d.binding} />
+              </div>
+              <div>
+                <div className="text-[10px] text-zinc-500 mb-0.5">Expression <span className="text-zinc-600 font-normal normal-case">(use <code className="bg-zinc-800 px-0.5 rounded">value</code> for tag value)</span></div>
+                <input value={d.expression ?? "value"} onChange={(e) => onUpdate({ expression: e.target.value })}
+                  placeholder="value > 5000" className={`${inp} font-mono text-[10px]`} />
+              </div>
+              <div>
+                <div className="text-[10px] text-zinc-500 mb-0.5">Target property</div>
+                <select value={d.targetProp ?? "bgColor"} onChange={(e) => onUpdate({ targetProp: e.target.value })} className={inp}>
+                  <option value="bgColor">Background color</option>
+                  <option value="borderColor">Border color</option>
+                  <option value="textColor">Text color</option>
+                  <option value="visible">Visibility (hide when false)</option>
+                </select>
+              </div>
+              {d.targetProp !== "visible" && (
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div>
+                    <div className="text-[10px] text-zinc-500 mb-0.5">When TRUE</div>
+                    <div className="flex gap-1">
+                      <input type="color" value={d.trueValue ?? "#22c55e"}
+                        onChange={(e) => onUpdate({ trueValue: e.target.value })}
+                        className="h-7 w-8 rounded border border-zinc-700 bg-zinc-900 cursor-pointer shrink-0" />
+                      <input value={d.trueValue ?? ""} onChange={(e) => onUpdate({ trueValue: e.target.value })}
+                        placeholder="#22c55e" className={`${inp} font-mono text-[10px]`} />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-zinc-500 mb-0.5">When FALSE</div>
+                    <div className="flex gap-1">
+                      <input type="color" value={d.falseValue ?? "#3f3f46"}
+                        onChange={(e) => onUpdate({ falseValue: e.target.value })}
+                        className="h-7 w-8 rounded border border-zinc-700 bg-zinc-900 cursor-pointer shrink-0" />
+                      <input value={d.falseValue ?? ""} onChange={(e) => onUpdate({ falseValue: e.target.value })}
+                        placeholder="(leave blank to keep default)" className={`${inp} font-mono text-[10px]`} />
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div className="text-[10px] text-zinc-600 italic border-t border-zinc-800 pt-1">
+                Example: <code className="bg-zinc-800 px-0.5 rounded">value &gt; 5000</code> → background turns red when tag exceeds 5000
+              </div>
+            </div>
+          )}
+
           {/* action dynamics */}
           {isAction && (
             <>
@@ -843,6 +1057,12 @@ function DynamicsEditor({ w, pageId }: { w: import("../store/projectStore").Widg
             <div className="absolute right-0 top-6 z-50 bg-zinc-800 border border-zinc-600 rounded-lg shadow-xl py-1 min-w-[150px]">
               <div className="text-[9px] text-zinc-500 px-3 py-1 uppercase tracking-wider">Property</div>
               {DYN_KINDS.filter((k) => k.group === "property").map((k) => (
+                <button key={k.kind} onClick={() => add(k.kind)}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-700 text-zinc-200">{k.label}</button>
+              ))}
+              <div className="border-t border-zinc-700 my-1" />
+              <div className="text-[9px] text-zinc-500 px-3 py-1 uppercase tracking-wider">Script</div>
+              {DYN_KINDS.filter((k) => k.group === "script").map((k) => (
                 <button key={k.kind} onClick={() => add(k.kind)}
                   className="w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-700 text-zinc-200">{k.label}</button>
               ))}
@@ -1176,9 +1396,20 @@ function ImageProps({ setConfig, cfgStr, inp, label }: PropertiesPanelProps) {
   );
 }
 
+function TextDisplayProps({ setConfig, cfgStr, inp, label }: PropertiesPanelProps) {
+  return (
+    <div>
+      {label("Static text (leave blank to show tag value)")}
+      <input value={cfgStr("staticText", "")} onChange={(e) => setConfig("staticText", e.target.value)}
+        placeholder="e.g. Pump Status" className={inp} />
+    </div>
+  );
+}
+
 // ── Register per-widget properties panels ─────────────────────────────────
 // Merges into registry entries created by widgets/index.tsx at module load.
 
+registerWidget({ type: "textDisplay", label: "Text", defaultW: 4, defaultH: 2, PropertiesPanel: TextDisplayProps });
 registerWidget({ type: "gauge",          label: "Gauge",       defaultW: 4, defaultH: 3, PropertiesPanel: GaugeProps });
 registerWidget({ type: "numericDisplay", label: "Numeric",     defaultW: 3, defaultH: 2, PropertiesPanel: NumericDisplayProps });
 registerWidget({ type: "numericInput",   label: "Numeric In",  defaultW: 3, defaultH: 2, PropertiesPanel: NumericInputProps });

@@ -1,7 +1,8 @@
 // Operator panel widget renderers — read + write support.
 // The operator runs ON the PLC so all URLs are relative (same origin).
-import { useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTag } from "../hooks/useTag";
+import { useTags } from "../hooks/useTags";
 import { useWriteConfirm, useNavigate } from "../writeContext";
 import { useAlarms } from "../alarmContext";
 
@@ -17,7 +18,54 @@ export type Widget = {
   binding?: string;
   visibleBinding?: string;
   config?: Record<string, unknown>;
+  dynamics?: unknown[];
 };
+
+// ── Script expression evaluator ───────────────────────────────────────────
+
+function evalExpression(expr: string, value: unknown): unknown {
+  try {
+    return new Function("value", `"use strict"; return (${expr})`)(value);
+  } catch {
+    return false;
+  }
+}
+
+const ScriptOverrideContext = createContext<Record<string, unknown>>({});
+
+// ── Typography helper ──────────────────────────────────────────────────────
+
+const FONT_SIZE_MAP: Record<string, string> = {
+  xs: "0.75rem", sm: "0.875rem", base: "1rem", lg: "1.125rem",
+  xl: "1.25rem", "2xl": "1.5rem", "3xl": "1.875rem", "4xl": "2.25rem",
+};
+const FONT_FAMILY_MAP: Record<string, string> = {
+  mono: "ui-monospace, monospace",
+  sans: "ui-sans-serif, system-ui, sans-serif",
+  serif: "ui-serif, Georgia, serif",
+};
+
+function fontStyle(config: Record<string, unknown> | undefined): React.CSSProperties {
+  if (!config) return {};
+  return {
+    fontFamily: FONT_FAMILY_MAP[config.fontFamily as string] ?? undefined,
+    fontSize:   FONT_SIZE_MAP[config.fontSize as string] ?? undefined,
+    fontWeight: config.fontBold    ? "bold"   : undefined,
+    fontStyle:  config.fontItalic  ? "italic" : undefined,
+    textDecoration: config.fontUnderline ? "underline" : undefined,
+    textAlign:  (config.textAlign as React.CSSProperties["textAlign"]) ?? undefined,
+    color:      (config.textColor as string) || undefined,
+  };
+}
+
+// ── Project images context ────────────────────────────────────────────────
+
+type ProjectImage = { id: string; dataUrl: string };
+const ProjectImagesContext = createContext<ProjectImage[]>([]);
+export const ProjectImagesProvider = ProjectImagesContext.Provider;
+function useProjectImage(id: string): string | undefined {
+  return useContext(ProjectImagesContext).find((img) => img.id === id)?.dataUrl;
+}
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -69,26 +117,45 @@ function resolveColor(
 // ── Frame ──────────────────────────────────────────────────────────────────
 
 function Frame({ w, children }: { w: Widget; children: React.ReactNode }) {
+  const overrides = useContext(ScriptOverrideContext);
   const colorThresholds = (w.config?.colorThresholds as ColorThreshold[]) ?? [];
   const colorBinding = (w.config?.colorBinding as string) || w.binding;
   const colorTag = useTag(colorThresholds.length ? colorBinding : undefined);
   const dynColor = resolveColor(colorTag.value, colorThresholds);
 
+  const bgColor = (overrides.bgColor as string | undefined) ?? (w.config?.bgColor as string | undefined);
+  const borderColor = (overrides.borderColor as string | undefined) ?? (w.config?.borderColor as string | undefined);
+  const textColor = (overrides.textColor as string | undefined) ?? (w.config?.textColor as string | undefined);
+  const noPadding = w.config?.noPadding as boolean | undefined;
+  const label = w.config?.label as string | undefined;
+
+  const isTransparent = bgColor === "none" || bgColor === "transparent";
+
+  const style: React.CSSProperties = {
+    background: isTransparent ? "transparent" : bgColor ?? "var(--card)",
+    borderColor: dynColor ?? (borderColor === "none" ? "transparent" : borderColor ?? "var(--border)"),
+    border: dynColor ? `2px solid ${dynColor}` : undefined,
+    boxShadow: dynColor ? `0 0 8px ${dynColor}44` : undefined,
+    color: textColor ?? "var(--card-foreground)",
+  };
+  if (!dynColor && !bgColor) {
+    style.border = "1px solid var(--border)";
+  }
+
   return (
     <div
-      className="h-full w-full rounded-lg bg-zinc-900/80 p-3 flex flex-col gap-1 select-none transition-colors"
-      style={{
-        border: dynColor ? `2px solid ${dynColor}` : "1px solid #27272a",
-        boxShadow: dynColor ? `0 0 8px ${dynColor}44` : undefined,
-      }}
+      className={`h-full w-full rounded-lg flex flex-col gap-1 select-none transition-colors ${noPadding ? "" : "p-3"}`}
+      style={style}
     >
-      <div
-        className="text-[10px] uppercase tracking-wider truncate"
-        style={{ color: dynColor ? dynColor : undefined }}
-      >
-        {(w.config?.label as string) ?? w.type}
-      </div>
-      <div className="flex-1 min-h-0">{children}</div>
+      {label && (
+        <div
+          className="text-[10px] uppercase tracking-wider truncate shrink-0"
+          style={{ color: dynColor ?? (textColor ?? "var(--card-foreground)"), opacity: 0.6 }}
+        >
+          {label}
+        </div>
+      )}
+      <div className="flex-1 min-h-0" style={fontStyle(w.config)}>{children}</div>
     </div>
   );
 }
@@ -155,7 +222,7 @@ function GaugeWidget({ w }: { w: Widget }) {
           {w.config?.unit ? ` ${w.config.unit as string}` : ""}
         </text>
       </svg>
-      <div className={`text-[9px] text-center ${qualityColor[t.quality] ?? "text-zinc-600"}`}>{t.quality}</div>
+      {(w.config?.showQuality ?? true) && <div className={`text-[9px] text-center ${qualityColor[t.quality] ?? "text-zinc-600"}`}>{t.quality}</div>}
     </div>
   );
 }
@@ -168,14 +235,21 @@ function NumericDisplayWidget({ w }: { w: Widget }) {
         {fmt(t.value)}
         {w.config?.unit ? <span className="text-base text-zinc-500 ml-1">{w.config.unit as string}</span> : null}
       </div>
-      <div className={`text-[10px] mt-1 ${qualityColor[t.quality] ?? "text-zinc-500"}`}>{t.quality}</div>
+      {(w.config?.showQuality ?? true) && <div className={`text-[10px] mt-1 ${qualityColor[t.quality] ?? "text-zinc-500"}`}>{t.quality}</div>}
     </div>
   );
 }
 
 function TextDisplayWidget({ w }: { w: Widget }) {
   const t = useTag(w.binding);
-  return <div className="text-lg break-words h-full flex items-center">{fmt(t.value)}</div>;
+  const staticText = w.config?.staticText as string | undefined;
+  const align = (w.config?.textAlign as string) || "left";
+  const justifyCls = align === "center" ? "justify-center" : align === "right" ? "justify-end" : "justify-start";
+  return (
+    <div className={`break-words h-full flex items-center ${justifyCls} text-lg`}>
+      {staticText ?? fmt(t.value)}
+    </div>
+  );
 }
 
 function LEDWidget({ w }: { w: Widget }) {
@@ -225,7 +299,7 @@ function TankWidget({ w }: { w: Widget }) {
       <div className="flex flex-col justify-end pb-1">
         <div className="text-xl font-semibold tabular-nums leading-none">{fmt(t.value)}</div>
         {(w.config?.unit as string | undefined) && <div className="text-[10px] text-zinc-500">{w.config!.unit as string}</div>}
-        <div className={`text-[9px] mt-1 ${qualityColor[t.quality] ?? "text-zinc-500"}`}>{t.quality}</div>
+        {(w.config?.showQuality ?? true) && <div className={`text-[9px] mt-1 ${qualityColor[t.quality] ?? "text-zinc-500"}`}>{t.quality}</div>}
       </div>
     </div>
   );
@@ -853,8 +927,11 @@ function AlarmBannerWidget({ w }: { w: Widget }) {
 // ── Image ──────────────────────────────────────────────────────────────────
 
 function ImageWidget({ w }: { w: Widget }) {
-  const src = w.config?.src as string | undefined;
+  const rawSrc = w.config?.src as string | undefined;
   const fit = (w.config?.fit as string) ?? "contain";
+  const libId = rawSrc?.startsWith("lib:") ? rawSrc.slice(4) : undefined;
+  const libData = useProjectImage(libId ?? "");
+  const src = libId ? libData : rawSrc;
   if (!src) {
     return <div className="flex items-center justify-center h-full text-zinc-600 text-xs">No image</div>;
   }
@@ -898,7 +975,123 @@ export function WidgetRenderer({ w }: { w: Widget }) {
   ));
   return (
     <VisibilityGate w={w}>
-      <Frame w={w}><R w={w} /></Frame>
+      <DynamicsApplicator w={w}>
+        <Frame w={w}><R w={w} /></Frame>
+      </DynamicsApplicator>
     </VisibilityGate>
+  );
+}
+
+// ── DynamicsApplicator ─────────────────────────────────────────────────────
+
+type Dynamic = {
+  id: string;
+  kind: string;
+  binding?: string;
+  expression?: string;
+  targetProp?: string;
+  trueValue?: string;
+  falseValue?: string;
+  trueColor?: string;
+  falseColor?: string;
+  blinkPeriodMs?: number;
+  minValue?: number; maxValue?: number; minAngle?: number; maxAngle?: number;
+  actionType?: string;
+  writeTo?: string; writeValue?: unknown; step?: number; pageId?: string; url?: string;
+};
+
+function DynamicsApplicator({ w, children }: { w: Widget; children: React.ReactNode }) {
+  const dynamics = (w.dynamics as Dynamic[] | undefined) ?? [];
+  const navigate = useNavigate();
+  const confirm  = useWriteConfirm();
+
+  const bindings = useMemo(() =>
+    [...new Set(dynamics.flatMap((d) => [d.binding, d.writeTo].filter(Boolean) as string[]))],
+    [dynamics] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const tagVals = useTags(bindings);
+
+  const [blinkVisible, setBlinkVisible] = useState(true);
+  const blinkDyn = dynamics.find((d) => d.kind === "blink" && d.binding && !!tagVals[d.binding]?.value);
+  useEffect(() => {
+    if (!blinkDyn) { setBlinkVisible(true); return; }
+    const half = (blinkDyn.blinkPeriodMs ?? 800) / 2;
+    const iv = setInterval(() => setBlinkVisible((v) => !v), half);
+    return () => clearInterval(iv);
+  }, [blinkDyn?.id, blinkDyn?.blinkPeriodMs, !!blinkDyn]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  let hidden = false;
+  let rotationDeg = 0;
+  let disabled = false;
+  let ringColor: string | undefined;
+  const scriptOverrides: Record<string, unknown> = {};
+
+  for (const d of dynamics) {
+    const rawVal = d.binding ? tagVals[d.binding]?.value : undefined;
+    const truthy = !!rawVal;
+    if (d.kind === "visibility" && d.binding && !truthy) { hidden = true; break; }
+    if (d.kind === "disable"    && d.binding && truthy)  disabled = true;
+    if (d.kind === "colorFill"  && d.binding) {
+      ringColor = truthy ? (d.trueColor ?? "#22c55e") : (d.falseColor ?? "#3f3f46");
+    }
+    if (d.kind === "rotation" && d.binding) {
+      const num = typeof rawVal === "number" ? rawVal : 0;
+      const vMin = d.minValue ?? 0, vMax = d.maxValue ?? 100;
+      const aMin = d.minAngle ?? -90, aMax = d.maxAngle ?? 90;
+      const frac = Math.max(0, Math.min(1, (num - vMin) / (vMax - vMin)));
+      rotationDeg = aMin + frac * (aMax - aMin);
+    }
+    if (d.kind === "script" && d.binding && d.targetProp) {
+      const result = evalExpression(d.expression ?? "value", rawVal);
+      if (d.targetProp === "visible") { if (!result) hidden = true; }
+      else {
+        const applied = result ? (d.trueValue ?? "") : (d.falseValue ?? "");
+        if (applied !== "") scriptOverrides[d.targetProp] = applied;
+      }
+    }
+  }
+
+  if (hidden) return null;
+
+  const hasClick    = dynamics.some((d) => d.kind === "onClick");
+  const hasPressed  = dynamics.some((d) => d.kind === "onPressed");
+  const hasReleased = dynamics.some((d) => d.kind === "onReleased");
+
+  const execAction = useCallback((kind: string) => {
+    const matching = dynamics.filter((d) => d.kind === kind);
+    for (const d of matching) {
+      if (d.actionType === "navigate" && d.pageId) navigate(d.pageId);
+      else if ((d.actionType === "writeValue" || d.actionType === "toggleValue" || d.actionType === "incrementValue") && d.writeTo) {
+        const cur = tagVals[d.writeTo]?.value;
+        const val = d.actionType === "toggleValue" ? !cur
+          : d.actionType === "incrementValue" ? (typeof cur === "number" ? cur + (d.step ?? 1) : (d.step ?? 1))
+          : d.writeValue;
+        confirm({ binding: d.writeTo, value: val });
+      }
+    }
+  }, [dynamics, tagVals, navigate, confirm]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <ScriptOverrideContext.Provider value={scriptOverrides}>
+      <div
+        className="relative w-full h-full"
+        style={{
+          transform: rotationDeg ? `rotate(${rotationDeg.toFixed(1)}deg)` : undefined,
+          opacity: blinkDyn && !blinkVisible ? 0 : 1,
+          pointerEvents: disabled ? "none" : undefined,
+          cursor: (hasClick || hasPressed) ? "pointer" : undefined,
+          outline: ringColor ? `2px solid ${ringColor}` : undefined,
+          outlineOffset: "-2px",
+          borderRadius: "0.5rem",
+          transition: "opacity 0.05s, outline-color 0.2s",
+        }}
+        onClick={hasClick ? () => execAction("onClick") : undefined}
+        onPointerDown={hasPressed  ? () => execAction("onPressed")  : undefined}
+        onPointerUp={hasReleased   ? () => execAction("onReleased") : undefined}
+      >
+        {disabled && <div className="absolute inset-0 z-10 bg-zinc-950/50 rounded-lg pointer-events-none" />}
+        {children}
+      </div>
+    </ScriptOverrideContext.Provider>
   );
 }

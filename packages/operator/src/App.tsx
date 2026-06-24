@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { WidgetRenderer, type Widget } from "./widgets";
+import { WidgetRenderer, ProjectImagesProvider, type Widget } from "./widgets";
 import { WriteConfirmContext, NavigateContext, type WriteRequest } from "./writeContext";
 import { AlarmContext, type AlarmEvent } from "./alarmContext";
 import { themes, applyTheme, getThemeById, getStoredThemeId } from "./store/themes";
 
-type Page = { id: string; name: string; widgets: Widget[] };
+type Page = { id: string; name: string; widgets: Widget[]; backgroundColor?: string; script?: string };
+type ProjectImage = { id: string; dataUrl: string };
 type Project = {
   version: string;
   name?: string;
   pages: Page[];
   datasources: unknown[];
+  images?: ProjectImage[];
   pin?: string;
   viewOnly?: boolean;
 };
@@ -194,7 +196,21 @@ export function App() {
   const [pinError, setPinError] = useState(false);
 
   const canvasRef = useRef<HTMLDivElement>(null);
-  const cellPx = 80; // fixed cell size — widgets don't scale with viewport
+
+  // Scale-to-fit: dynamically compute cell size from container width
+  const [scaleToFit, setScaleToFit] = useState(() => localStorage.getItem("xhmi-scale") === "1");
+  const [containerW, setContainerW] = useState(0);
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver((entries) => {
+      setContainerW(entries[0]!.contentRect.width - 24); // subtract p-3 * 2
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+  const cellPx = scaleToFit && containerW > 0 ? Math.max(40, Math.floor(containerW / COLS)) : 80;
+  const toggleScale = () => setScaleToFit((s) => { localStorage.setItem("xhmi-scale", s ? "0" : "1"); return !s; });
 
   // Theme — persisted in localStorage via applyTheme
   const [themeId, setThemeId] = useState(getStoredThemeId);
@@ -364,13 +380,18 @@ export function App() {
   const page = project.pages[activePage] ?? project.pages[0];
 
   return (
+    <ProjectImagesProvider value={project.images ?? []}>
     <AlarmContext.Provider value={{ alarms, ack }}>
     <NavigateContext.Provider value={navigateToPage}>
     <WriteConfirmContext.Provider value={requestWrite}>
-      <div className={`${isKiosk ? "h-screen overflow-hidden" : "min-h-screen"} bg-zinc-950 text-zinc-100 flex flex-col`}>
+      <div
+        className={`${isKiosk ? "h-screen overflow-hidden" : "min-h-screen"} flex flex-col`}
+        style={{ background: "var(--background)", color: "var(--foreground)" }}
+      >
         {/* Header — hidden in kiosk mode */}
         {!isKiosk && (
-          <div className="flex items-center gap-3 px-4 py-2 border-b border-zinc-800 bg-zinc-900/60 shrink-0">
+          <div className="flex items-center gap-3 px-4 py-2 shrink-0"
+               style={{ borderBottom: "1px solid var(--border)", background: "var(--card)" }}>
             <span className="font-semibold text-sm">
               {project.name
                 ? <>{project.name} <span className="text-zinc-500 font-normal text-xs">· X-HMI</span></>
@@ -398,7 +419,10 @@ export function App() {
                 <button
                   key={p.id}
                   onClick={() => setActivePage(i)}
-                  className={`text-xs px-3 py-1 rounded ${i === activePage ? "bg-blue-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"}`}
+                  className="text-xs px-3 py-1 rounded transition-colors"
+                  style={i === activePage
+                    ? { background: "var(--primary)", color: "var(--primary-foreground)" }
+                    : { background: "var(--secondary)", color: "var(--muted-foreground)" }}
                 >
                   {p.name}
                 </button>
@@ -415,21 +439,35 @@ export function App() {
             <button
               onClick={() => setShowAlarmLog(true)}
               title="Open alarm log"
-              className={`text-xs px-2 py-0.5 rounded text-zinc-300 ${alarms.length > 0 ? "bg-amber-800 hover:bg-amber-700" : "bg-zinc-800 hover:bg-zinc-700"}`}
+              className="text-xs px-2 py-0.5 rounded transition-colors"
+              style={{ background: alarms.length > 0 ? "var(--warning)" : "var(--secondary)", color: alarms.length > 0 ? "#000" : "var(--muted-foreground)", border: "1px solid var(--border)" }}
             >
               🔔 Alarm Log
             </button>
             <button
               onClick={() => setShowRecipes(true)}
               title="Open recipes panel"
-              className="text-xs px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+              className="text-xs px-2 py-0.5 rounded transition-colors"
+              style={{ background: "var(--secondary)", color: "var(--muted-foreground)", border: "1px solid var(--border)" }}
             >
               ⚙ Recipes
+            </button>
+            <button
+              onClick={toggleScale}
+              title={scaleToFit ? "Fixed cell size (80px)" : "Scale widgets to fit window"}
+              className="text-[11px] px-2 py-0.5 rounded transition-colors"
+              style={{
+                background: scaleToFit ? "var(--primary)" : "var(--secondary)",
+                color: scaleToFit ? "var(--primary-foreground)" : "var(--muted-foreground)",
+                border: "1px solid var(--border)",
+              }}
+            >
+              {scaleToFit ? "⤢ Fit" : "⤢ Fit"}
             </button>
             <select
               value={themeId}
               onChange={(e) => setThemeId(e.target.value)}
-              className="text-[11px] rounded px-1.5 py-0.5 text-zinc-200 max-w-[140px] truncate"
+              className="text-[11px] rounded px-1.5 py-0.5 max-w-[140px] truncate"
               style={{ background: "var(--secondary)", color: "var(--foreground)", borderColor: "var(--border)", border: "1px solid" }}
               title="Switch theme"
             >
@@ -445,28 +483,6 @@ export function App() {
               >
                 🔒
               </button>
-            )}
-          </div>
-        )}
-
-        {/* Alarm banner strip — always shown */}
-        {activeAlarms.length > 0 && (
-          <div className="px-4 py-1.5 space-y-1 border-b border-zinc-800 bg-zinc-900/40 shrink-0">
-            {activeAlarms.slice(0, isKiosk ? 2 : 3).map((a) => (
-              <div key={a.id} className={`flex items-center gap-3 px-3 py-1 rounded border text-xs ${severityBg[a.severity]}`}>
-                <span className="font-semibold uppercase text-[10px] w-16 shrink-0">{a.severity}</span>
-                <span className="flex-1 truncate">{a.ruleName}{a.message ? ` — ${a.message}` : ""}</span>
-                <span className="font-mono text-[10px] text-zinc-400 shrink-0">{a.value.toFixed(2)}</span>
-                <button
-                  onClick={() => ack(a.id)}
-                  className="text-[10px] px-2 py-0.5 rounded bg-zinc-700 hover:bg-zinc-600 shrink-0"
-                >
-                  ACK
-                </button>
-              </div>
-            ))}
-            {activeAlarms.length > 3 && !isKiosk && (
-              <div className="text-[10px] text-zinc-500 px-3">…and {activeAlarms.length - 3} more</div>
             )}
           </div>
         )}
@@ -494,6 +510,7 @@ export function App() {
         <div
           ref={canvasRef}
           className="flex-1 overflow-auto p-3"
+          style={{ background: page.backgroundColor || undefined }}
           onTouchStart={isKiosk ? handleTouchStart : undefined}
           onTouchEnd={isKiosk ? handleTouchEnd : undefined}
         >
@@ -540,6 +557,7 @@ export function App() {
     </WriteConfirmContext.Provider>
     </NavigateContext.Provider>
     </AlarmContext.Provider>
+    </ProjectImagesProvider>
   );
 }
 

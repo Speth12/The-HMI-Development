@@ -48,7 +48,7 @@ export type DynActionType =
 export type Dynamic = {
   id: string;
   kind: "visibility" | "colorFill" | "blink" | "rotation" | "disable"
-      | "onClick" | "onPressed" | "onReleased";
+      | "onClick" | "onPressed" | "onReleased" | "script";
   // property dynamics — tag binding
   binding?: string;
   // colorFill: truthy/falsy → color ring
@@ -69,6 +69,11 @@ export type Dynamic = {
   step?: number;          // for incrementValue
   pageId?: string;        // for navigate
   url?: string;           // for openUrl
+  // script dynamic — JS expression evaluated with `value` = tag value
+  expression?: string;    // e.g. "value > 5000"
+  targetProp?: string;    // config key to override: "bgColor" | "borderColor" | "textColor" | "visible"
+  trueValue?: string;     // applied when expression is truthy
+  falseValue?: string;    // applied when expression is falsy
 };
 
 export type Widget = {
