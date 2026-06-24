@@ -144,7 +144,7 @@ function Frame({ w, children }: { w: Widget; children: React.ReactNode }) {
 
   return (
     <div
-      className={`h-full w-full rounded-lg flex flex-col gap-1 select-none transition-colors ${noPadding ? "" : "p-3"}`}
+      className={`h-full w-full rounded-lg flex flex-col gap-1 select-none transition-colors overflow-hidden ${noPadding ? "" : "p-3"}`}
       style={style}
     >
       {label && (
@@ -155,7 +155,7 @@ function Frame({ w, children }: { w: Widget; children: React.ReactNode }) {
           {label}
         </div>
       )}
-      <div className="flex-1 min-h-0" style={fontStyle(w.config)}>{children}</div>
+      <div className="flex-1 min-h-0 flex flex-col" style={fontStyle(w.config)}>{children}</div>
     </div>
   );
 }
@@ -869,11 +869,8 @@ function MultiStateWidget({ w }: { w: Widget }) {
   const text    = match?.label    ?? (raw == null ? "—" : String(raw));
 
   return (
-    <div
-      className="h-full flex items-center justify-center rounded transition-colors duration-300"
-      style={{ backgroundColor: bg }}
-    >
-      <span className="text-lg font-bold tracking-widest uppercase" style={{ color: textClr }}>
+    <div style={{ flex: 1, backgroundColor: bg, borderRadius: "4px", display: "flex", alignItems: "center", justifyContent: "center", color: textClr }}>
+      <span className="text-base font-bold uppercase text-center px-2 leading-tight">
         {text}
       </span>
     </div>

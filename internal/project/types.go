@@ -1,5 +1,7 @@
 package project
 
+import "encoding/json"
+
 // Runtime project file — single source of truth. Generated types: internal/project/types.go
 // + packages/shared-types/src/project.ts
 type Types struct {
@@ -67,23 +69,25 @@ type PageElement struct {
 }
 
 type WidgetElement struct {
-	// datasource_id:tag_path, e.g. 'opcua:ns=2;s=PLCnext.iTest'              
-	Binding                                                     *string       `json:"binding,omitempty"`
-	Config                                                      *WidgetConfig `json:"config,omitempty"`
-	// Height in grid units                                                   
-	H                                                           int64         `json:"h"`
-	ID                                                          string        `json:"id"`
-	// IDE-only: widget cannot be moved or resized                            
-	Locked                                                      *bool         `json:"locked,omitempty"`
-	Type                                                        WidgetType    `json:"type"`
-	// BOOL tag — widget hidden when value is 0/false                         
-	VisibleBinding                                              *string       `json:"visibleBinding,omitempty"`
-	// Width in grid units                                                    
-	W                                                           int64         `json:"w"`
-	// Grid column                                                            
-	X                                                           int64         `json:"x"`
-	// Grid row                                                               
-	Y                                                           int64         `json:"y"`
+	// datasource_id:tag_path, e.g. 'opcua:ns=2;s=PLCnext.iTest'
+	Binding                                                     *string          `json:"binding,omitempty"`
+	Config                                                      *WidgetConfig    `json:"config,omitempty"`
+	// Widget dynamics (visibility, opacity, color, script). Passed through as raw JSON.
+	Dynamics                                                    json.RawMessage  `json:"dynamics,omitempty"`
+	// Height in grid units
+	H                                                           int64            `json:"h"`
+	ID                                                          string           `json:"id"`
+	// IDE-only: widget cannot be moved or resized
+	Locked                                                      *bool            `json:"locked,omitempty"`
+	Type                                                        WidgetType       `json:"type"`
+	// BOOL tag — widget hidden when value is 0/false
+	VisibleBinding                                              *string          `json:"visibleBinding,omitempty"`
+	// Width in grid units
+	W                                                           int64            `json:"w"`
+	// Grid column
+	X                                                           int64            `json:"x"`
+	// Grid row
+	Y                                                           int64            `json:"y"`
 }
 
 // Per-widget configuration. Fields depend on type.

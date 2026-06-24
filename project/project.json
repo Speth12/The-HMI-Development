@@ -86,7 +86,7 @@
           "config": {
             "label": "Bool State",
             "states": [
-              { "value": false, "label": "OFFLINE", "color": "#27272a", "textColor": "#71717a" },
+              { "value": false, "label": "OFFLINE", "color": "#27272a", "textColor": "#d4d4d8" },
               { "value": true,  "label": "ONLINE",  "color": "#052e16", "textColor": "#4ade80" }
             ]
           }
