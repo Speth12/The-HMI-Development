@@ -632,7 +632,7 @@ function ImageUploadEditor({ setConfig, cfgStr, inp, label }: {
 
 // ── Color binding editor ───────────────────────────────────────────────────
 
-type ColorThreshold = { value: number; color: string };
+type ColorThreshold = { value: number; toValue?: number; color: string };
 
 function ColorBindingEditor({ w, setConfig, cfgStr, inp, numInp, label }: {
   w: { binding?: string; config?: Record<string, unknown> };
@@ -653,7 +653,7 @@ function ColorBindingEditor({ w, setConfig, cfgStr, inp, numInp, label }: {
 
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Color</div>
+      <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Frame Border Color</div>
       <div className="mb-1.5">
         <div className="text-[10px] text-zinc-500 mb-0.5">Source tag (blank = use binding)</div>
         <input
@@ -664,16 +664,22 @@ function ColorBindingEditor({ w, setConfig, cfgStr, inp, numInp, label }: {
         />
       </div>
       <div className="flex items-center justify-between mb-1">
-        {label("Thresholds (≥ value → color)")}
+        {label("Thresholds (from → to → color)")}
         <button onClick={add} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700">+ add</button>
       </div>
       <div className="space-y-1">
         {thresholds.map((t, i) => (
           <div key={i} className="flex items-center gap-1.5">
-            <span className="text-[10px] text-zinc-600 w-3">≥</span>
             <input type="number" value={t.value}
               onChange={(e) => update(i, { value: Number(e.target.value) })}
-              className={`${numInp} w-16`} />
+              title="From (≥)"
+              className={`${numInp} w-14`} />
+            <span className="text-[10px] text-zinc-600">→</span>
+            <input type="number" value={t.toValue ?? ""}
+              onChange={(e) => update(i, { toValue: e.target.value === "" ? undefined : Number(e.target.value) })}
+              placeholder="∞"
+              title="To (exclusive, blank = no upper bound)"
+              className={`${numInp} w-14`} />
             <input type="color" value={t.color}
               onChange={(e) => update(i, { color: e.target.value })}
               className="h-6 w-8 rounded border border-zinc-700 bg-zinc-900 cursor-pointer shrink-0" />
@@ -733,7 +739,7 @@ function UnitEditor({ cfgStr, setConfig, inp, label }: {
   );
 }
 
-type Threshold = { value: number; color: string };
+type Threshold = { value: number; toValue?: number; color: string };
 
 function ThresholdEditor({ w, setConfig, inp, numInp, label }: {
   w: { config?: Record<string, unknown> };
@@ -759,26 +765,32 @@ function ThresholdEditor({ w, setConfig, inp, numInp, label }: {
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        {label("Color thresholds")}
+        {label("Fill Color Thresholds (from → to)")}
         <button onClick={add} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700">+ add</button>
       </div>
       <div className="space-y-1">
         {thresholds.map((t, i) => (
           <div key={i} className="flex items-center gap-1.5">
-            <span className="text-[10px] text-zinc-600 w-6">≥</span>
             <input type="number" value={t.value}
               onChange={(e) => update(i, { value: Number(e.target.value) })}
-              className={`${numInp} w-16 flex-1`} />
+              title="From (≥)"
+              className={`${numInp} w-14`} />
+            <span className="text-[10px] text-zinc-600">→</span>
+            <input type="number" value={t.toValue ?? ""}
+              onChange={(e) => update(i, { toValue: e.target.value === "" ? undefined : Number(e.target.value) })}
+              placeholder="∞"
+              title="To (exclusive, blank = no upper bound)"
+              className={`${numInp} w-14`} />
             <input type="color" value={t.color}
               onChange={(e) => update(i, { color: e.target.value })}
               className="h-6 w-8 rounded border border-zinc-700 bg-zinc-900 cursor-pointer shrink-0" />
             <input value={t.color} onChange={(e) => update(i, { color: e.target.value })}
-              className={`${inp} w-20 font-mono text-[10px]`} />
+              className={`${inp} flex-1 font-mono text-[10px]`} />
             <button onClick={() => remove(i)} className="text-zinc-600 hover:text-red-400 text-xs shrink-0">×</button>
           </div>
         ))}
         {thresholds.length === 0 && (
-          <div className="text-[10px] text-zinc-600 italic">No thresholds — bar stays green</div>
+          <div className="text-[10px] text-zinc-600 italic">No thresholds — default fill color</div>
         )}
       </div>
     </div>

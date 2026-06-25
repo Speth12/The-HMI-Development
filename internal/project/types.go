@@ -143,9 +143,12 @@ type WidgetConfig struct {
 }
 
 type ColorThresholdElement struct {
-	// CSS color, e.g. '#22c55e'        
-	Color                       string  `json:"color"`
-	Value                       float64 `json:"value"`
+	// CSS color, e.g. '#22c55e'
+	Color string `json:"color"`
+	// Optional upper bound (exclusive). If set, matches value >= Value && value < ToValue.
+	// If absent, matches value >= Value (open-ended, highest match wins).
+	ToValue *float64 `json:"toValue,omitempty"`
+	Value   float64  `json:"value"`
 }
 
 type RefLineElement struct {

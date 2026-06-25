@@ -99,7 +99,7 @@ async function writeTag(binding: string, value: unknown): Promise<void> {
 
 // ── Color threshold helper ─────────────────────────────────────────────────
 
-type ColorThreshold = { value: number; color: string };
+type ColorThreshold = { value: number; toValue?: number; color: string };
 
 function resolveColor(
   value: unknown,
@@ -107,7 +107,14 @@ function resolveColor(
 ): string | null {
   if (!thresholds.length) return null;
   if (typeof value !== "number") return null;
-  const sorted = [...thresholds].sort((a, b) => b.value - a.value);
+  // Explicit range entries [value, toValue) take precedence
+  for (const t of thresholds) {
+    if (t.toValue !== undefined && value >= t.value && value < t.toValue) return t.color;
+  }
+  // Open-ended ≥ entries: highest matching threshold wins (backwards compatible)
+  const sorted = [...thresholds]
+    .filter((t) => t.toValue === undefined)
+    .sort((a, b) => b.value - a.value);
   for (const t of sorted) {
     if (value >= t.value) return t.color;
   }
@@ -185,9 +192,8 @@ function GaugeWidget({ w }: { w: Widget }) {
   const v = typeof t.value === "number" ? t.value : min;
   const pct = Math.max(0, Math.min(1, (v - min) / (max - min)));
   const fillSweep = pct * GAUGE_SWEEP;
-  const thresholds = (w.config?.thresholds as Array<{ value: number; color: string }>) ?? [];
-  let arcColor = "#22c55e";
-  thresholds.forEach((th) => { if (v >= th.value) arcColor = th.color; });
+  const thresholds = (w.config?.thresholds as ColorThreshold[]) ?? [];
+  const arcColor = resolveColor(v, thresholds) ?? "#22c55e";;
 
   // needleAngle: degrees clockwise from 12 o'clock. We draw the needle at 12 o'clock
   // (pointing up) and rotate it with CSS transform for smooth animation.
@@ -281,9 +287,8 @@ function TankWidget({ w }: { w: Widget }) {
   const max = (w.config?.max as number) ?? 100;
   const v = typeof t.value === "number" ? t.value : 0;
   const pct = Math.max(0, Math.min(100, ((v - min) / (max - min)) * 100));
-  const thresholds = (w.config?.thresholds as Array<{ value: number; color: string }>) ?? [];
-  let fillColor = "#3b82f6";
-  thresholds.forEach((th) => { if (v >= th.value) fillColor = th.color; });
+  const thresholds = (w.config?.thresholds as ColorThreshold[]) ?? [];
+  const fillColor = resolveColor(v, thresholds) ?? "#3b82f6";
   return (
     <div className="flex gap-3 h-full items-end">
       <div className="flex flex-col w-10 h-full bg-zinc-800 rounded-md overflow-hidden relative border border-zinc-700">

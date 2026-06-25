@@ -277,7 +277,12 @@ export interface ColorThresholdElement {
      * CSS color, e.g. '#22c55e'
      */
     color: string;
-    value: number;
+    /**
+     * Optional upper bound (exclusive). If set, threshold matches value >= this.value && value < toValue.
+     * If absent, matches value >= this.value (open-ended, highest match wins).
+     */
+    toValue?: number;
+    value:    number;
 }
 
 /**
