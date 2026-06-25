@@ -1177,8 +1177,7 @@ function DynamicsApplicator({ w, children }: { w: Widget; children: React.ReactN
     }
   }
 
-  if (hidden) return null;
-
+  // Callbacks must be declared unconditionally before any early return (Rules of Hooks)
   const hasClick    = dynamics.some((d) => d.kind === "onClick");
   const hasPressed  = dynamics.some((d) => d.kind === "onPressed");
   const hasReleased = dynamics.some((d) => d.kind === "onReleased");
@@ -1186,6 +1185,8 @@ function DynamicsApplicator({ w, children }: { w: Widget; children: React.ReactN
   const handleClick    = useCallback(() => dynamics.filter((d) => d.kind === "onClick").forEach((d) => execDynAction(d, tagVals, setActivePage)), [dynamics, tagVals, setActivePage]); // eslint-disable-line react-hooks/exhaustive-deps
   const handlePressed  = useCallback(() => dynamics.filter((d) => d.kind === "onPressed").forEach((d) => execDynAction(d, tagVals, setActivePage)), [dynamics, tagVals, setActivePage]); // eslint-disable-line react-hooks/exhaustive-deps
   const handleReleased = useCallback(() => dynamics.filter((d) => d.kind === "onReleased").forEach((d) => execDynAction(d, tagVals, setActivePage)), [dynamics, tagVals, setActivePage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (hidden) return null;
 
   return (
     <ScriptOverrideContext.Provider value={scriptOverrides}>

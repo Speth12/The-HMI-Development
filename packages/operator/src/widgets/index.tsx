@@ -1055,8 +1055,7 @@ function DynamicsApplicator({ w, children }: { w: Widget; children: React.ReactN
     }
   }
 
-  if (hidden) return null;
-
+  // Callbacks must be declared unconditionally before any early return (Rules of Hooks)
   const hasClick    = dynamics.some((d) => d.kind === "onClick");
   const hasPressed  = dynamics.some((d) => d.kind === "onPressed");
   const hasReleased = dynamics.some((d) => d.kind === "onReleased");
@@ -1074,6 +1073,8 @@ function DynamicsApplicator({ w, children }: { w: Widget; children: React.ReactN
       }
     }
   }, [dynamics, tagVals, navigate, confirm]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (hidden) return null;
 
   return (
     <ScriptOverrideContext.Provider value={scriptOverrides}>
