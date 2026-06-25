@@ -143,6 +143,25 @@ function fontStyle(config: Record<string, unknown> | undefined): React.CSSProper
   };
 }
 
+// ── Color threshold helper ─────────────────────────────────────────────────
+
+type ColorThreshold = { value: number; toValue?: number; color: string };
+
+function resolveColor(value: unknown, thresholds: ColorThreshold[]): string | null {
+  if (!thresholds.length) return null;
+  if (typeof value !== "number") return null;
+  for (const t of thresholds) {
+    if (t.toValue !== undefined && value >= t.value && value < t.toValue) return t.color;
+  }
+  const sorted = [...thresholds]
+    .filter((t) => t.toValue === undefined)
+    .sort((a, b) => b.value - a.value);
+  for (const t of sorted) {
+    if (value >= t.value) return t.color;
+  }
+  return null;
+}
+
 // ── shared Frame ───────────────────────────────────────────────────────────
 
 function Frame({ w, children }: { w: Widget; children: React.ReactNode }) {
@@ -206,9 +225,9 @@ function GaugeWidget({ w }: { w: Widget }) {
   const pct = Math.max(0, Math.min(1, (v - min) / (max - min)));
   const fillSweep = pct * GAUGE_SWEEP;
 
-  const thresholds = (w.config?.thresholds as Array<{ value: number; color: string }>) ?? [];
-  let arcColor = "#22c55e";
-  thresholds.forEach((th) => { if (v >= th.value) arcColor = th.color; });
+  const colorThresholds = (w.config?.colorThresholds as ColorThreshold[]) ?? [];
+  const legacyThresholds = (w.config?.thresholds as ColorThreshold[]) ?? [];
+  const arcColor = resolveColor(v, colorThresholds.length ? colorThresholds : legacyThresholds) ?? "#22c55e";
 
   // needleAngle: degrees clockwise from 12 o'clock. Needle drawn at 12 o'clock,
   // rotated via CSS transform for smooth animation.
@@ -468,9 +487,9 @@ function TankWidget({ w }: { w: Widget }) {
   const max = (w.config?.max as number) ?? 100;
   const v = typeof t.value === "number" ? t.value : 0;
   const pct = Math.max(0, Math.min(100, ((v - min) / (max - min)) * 100));
-  const thresholds = (w.config?.thresholds as Array<{ value: number; color: string }>) ?? [];
-  let fillColor = "#3b82f6"; // blue default
-  thresholds.forEach((th) => { if (v >= th.value) fillColor = th.color; });
+  const colorThresholds = (w.config?.colorThresholds as ColorThreshold[]) ?? [];
+  const legacyThresholds = (w.config?.thresholds as ColorThreshold[]) ?? [];
+  const fillColor = resolveColor(v, colorThresholds.length ? colorThresholds : legacyThresholds) ?? "#3b82f6";
 
   return (
     <div className="flex gap-3 h-full items-end">

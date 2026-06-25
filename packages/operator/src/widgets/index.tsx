@@ -192,8 +192,9 @@ function GaugeWidget({ w }: { w: Widget }) {
   const v = typeof t.value === "number" ? t.value : min;
   const pct = Math.max(0, Math.min(1, (v - min) / (max - min)));
   const fillSweep = pct * GAUGE_SWEEP;
-  const thresholds = (w.config?.thresholds as ColorThreshold[]) ?? [];
-  const arcColor = resolveColor(v, thresholds) ?? "#22c55e";;
+  const colorThresholds = (w.config?.colorThresholds as ColorThreshold[]) ?? [];
+  const legacyThresholds = (w.config?.thresholds as ColorThreshold[]) ?? [];
+  const arcColor = resolveColor(v, colorThresholds.length ? colorThresholds : legacyThresholds) ?? "#22c55e";
 
   // needleAngle: degrees clockwise from 12 o'clock. We draw the needle at 12 o'clock
   // (pointing up) and rotate it with CSS transform for smooth animation.
@@ -287,8 +288,9 @@ function TankWidget({ w }: { w: Widget }) {
   const max = (w.config?.max as number) ?? 100;
   const v = typeof t.value === "number" ? t.value : 0;
   const pct = Math.max(0, Math.min(100, ((v - min) / (max - min)) * 100));
-  const thresholds = (w.config?.thresholds as ColorThreshold[]) ?? [];
-  const fillColor = resolveColor(v, thresholds) ?? "#3b82f6";
+  const colorThresholds = (w.config?.colorThresholds as ColorThreshold[]) ?? [];
+  const legacyThresholds = (w.config?.thresholds as ColorThreshold[]) ?? [];
+  const fillColor = resolveColor(v, colorThresholds.length ? colorThresholds : legacyThresholds) ?? "#3b82f6";
   return (
     <div className="flex gap-3 h-full items-end">
       <div className="flex flex-col w-10 h-full bg-zinc-800 rounded-md overflow-hidden relative border border-zinc-700">
