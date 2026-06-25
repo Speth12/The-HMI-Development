@@ -71,7 +71,8 @@ type PageElement struct {
 type WidgetElement struct {
 	// datasource_id:tag_path, e.g. 'opcua:ns=2;s=PLCnext.iTest'
 	Binding                                                     *string          `json:"binding,omitempty"`
-	Config                                                      *WidgetConfig    `json:"config,omitempty"`
+	// Widget config. Passed through as raw JSON so unknown fields (font, appearance, etc.) are preserved.
+	Config                                                      json.RawMessage  `json:"config,omitempty"`
 	// Widget dynamics (visibility, opacity, color, script). Passed through as raw JSON.
 	Dynamics                                                    json.RawMessage  `json:"dynamics,omitempty"`
 	// Height in grid units

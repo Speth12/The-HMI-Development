@@ -138,6 +138,8 @@ export interface WidgetElement {
      */
     binding?: string;
     config?:  ConfigObject;
+    /** Widget dynamics (visibility, opacity, color, script). */
+    dynamics?: unknown[];
     /**
      * Height in grid units
      */
