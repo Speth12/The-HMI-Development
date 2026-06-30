@@ -2,6 +2,18 @@
  * Runtime project file — single source of truth. Generated types: internal/project/types.go
  * + packages/shared-types/src/project.ts
  */
+export interface NamespaceNode {
+    path:        string;
+    type:        "folder" | "asset" | "tag" | "virtual";
+    dataType?:   string;
+    description?: string;
+    unit?:       string;
+    driverId?:   string;
+    driverAddr?: string;
+    expression?: string;
+    meta?:       Record<string, string>;
+}
+
 export interface Project {
     alarmRules?: AlarmRuleElement[];
     datasources: DatasourceElement[];
@@ -9,6 +21,11 @@ export interface Project {
      * Human-readable project name
      */
     name?: string;
+    /**
+     * Unified Namespace — flat list of namespace nodes (folders, assets, tags).
+     * Tags with driverId+driverAddr are bound to a live data source.
+     */
+    namespace?: NamespaceNode[];
     pages: PageElement[];
     /**
      * Operator PIN — operator panel locks behind this if set

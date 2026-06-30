@@ -778,7 +778,7 @@ function HistoryLogWidget({ w }: { w: Widget }) {
     const from = (Date.now() - 3600_000) * 1e6;
     fetch(`${apiBase}/api/v1/history?path=${encodeURIComponent(w.binding)}&from=${from}&limit=${(w.config?.pageSize as number) ?? 100}`)
       .then((r) => (r.ok ? r.json() : []))
-      .then(setRows)
+      .then((data: unknown) => setRows(Array.isArray(data) ? data : []))
       .catch(() => {});
   }, [w.binding]);
 
@@ -800,8 +800,8 @@ function HistoryLogWidget({ w }: { w: Widget }) {
         </button>
       </div>
       <div className="flex-1 overflow-auto text-[10px] font-mono space-y-0.5">
-        {rows.length === 0 && <div className="text-zinc-600 italic">No history</div>}
-        {[...rows].reverse().map((r, i) => (
+        {(rows?.length ?? 0) === 0 && <div className="text-zinc-600 italic">No history</div>}
+        {[...(rows ?? [])].reverse().map((r, i) => (
           <div key={i} className="flex gap-2 border-b border-zinc-800/50 pb-0.5">
             <span className="text-zinc-600 shrink-0">
               {new Date(r.ts > 1e15 ? r.ts / 1e6 : r.ts).toLocaleTimeString()}

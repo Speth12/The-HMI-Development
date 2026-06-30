@@ -7,9 +7,9 @@ import { Users } from "./Users";
 import { TagBrowser, TagScannerModal } from "./TagBrowser";
 import { generateStandaloneHtml } from "../store/exportHtml";
 import { AuditTrail } from "./AuditTrail";
-import { UDTs } from "./UDTs";
 import { AssetModel } from "./AssetModel";
 import { Faceplates } from "./Faceplates";
+import { Namespace } from "./Namespace";
 import { MCPModal } from "./MCPModal";
 import { downloadGitFormat, importGitFormat } from "../store/gitFormat";
 import { apiBase } from "../store/runtimeTarget";
@@ -302,6 +302,11 @@ export function LeftPanel({ width }: { width?: number }) {
           <Users />
         </TreeSection>
 
+        {/* Namespace */}
+        <TreeSection label="Namespace" count={project.namespace?.length}>
+          <Namespace />
+        </TreeSection>
+
         {/* Assets & Faceplates */}
         <TreeSection label="Assets">
           <AssetModel />
@@ -309,11 +314,6 @@ export function LeftPanel({ width }: { width?: number }) {
 
         <TreeSection label="Faceplates" count={project.faceplates?.length}>
           <Faceplates />
-        </TreeSection>
-
-        {/* UDTs */}
-        <TreeSection label="UDTs" count={project.udts?.length}>
-          <UDTs />
         </TreeSection>
 
         {/* Settings */}

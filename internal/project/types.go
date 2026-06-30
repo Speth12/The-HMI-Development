@@ -7,15 +7,17 @@ import "encoding/json"
 type Types struct {
 	AlarmRules                                               []AlarmRuleElement  `json:"alarmRules,omitempty"`
 	Datasources                                              []DatasourceElement `json:"datasources"`
-	// Human-readable project name                                               
+	// Human-readable project name
 	Name                                                     *string             `json:"name,omitempty"`
+	// Unified Namespace — flat list of namespace nodes (folders, assets, tags).
+	Namespace                                                json.RawMessage     `json:"namespace,omitempty"`
 	Pages                                                    []PageElement       `json:"pages"`
-	// Operator PIN — operator panel locks behind this if set                    
+	// Operator PIN — operator panel locks behind this if set
 	Pin                                                      *string             `json:"pin,omitempty"`
 	Recipes                                                  []RecipeElement     `json:"recipes,omitempty"`
-	// Schema version, e.g. '0.1.0'                                              
+	// Schema version, e.g. '0.1.0'
 	Version                                                  string              `json:"version"`
-	// Disable all write widgets in the operator panel                           
+	// Disable all write widgets in the operator panel
 	ViewOnly                                                 *bool               `json:"viewOnly,omitempty"`
 }
 

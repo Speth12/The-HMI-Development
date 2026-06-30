@@ -357,28 +357,9 @@ export function TagScannerModal({
 // ── Root component ─────────────────────────────────────────────────────────
 
 export function TagBrowser() {
-  const [mode, setMode] = useState<"source" | "namespace">("source");
-
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* Mode tabs */}
-      <div className="flex border-b border-zinc-800 shrink-0">
-        {(["source", "namespace"] as const).map((m) => (
-          <button
-            key={m}
-            onClick={() => setMode(m)}
-            className={`flex-1 py-1 text-[10px] uppercase tracking-wider font-medium transition-colors ${
-              mode === m
-                ? "text-zinc-100 border-b-2 border-blue-500 -mb-px"
-                : "text-zinc-500 hover:text-zinc-300"
-            }`}
-          >
-            {m === "source" ? "By Source" : "Namespace"}
-          </button>
-        ))}
-      </div>
-
-      {mode === "source" ? <SourceBrowser /> : <NamespaceBrowser />}
+      <SourceBrowser />
     </div>
   );
 }
@@ -651,10 +632,7 @@ function NamespaceBrowser() {
   const bindNSNode = (node: NSNode) => {
     if (!selectedWidgetId) return;
     if (node.type !== "tag" && node.type !== "virtual") return;
-    const binding = node.driverId && node.driverAddr
-      ? `${node.driverId}:${node.driverAddr}`
-      : node.path;
-    updateWidget(activePageId, selectedWidgetId, { binding });
+    updateWidget(activePageId, selectedWidgetId, { binding: `ns:${node.path}` });
   };
 
   const subscribeTag = useCallback((path: string) => {
@@ -674,7 +652,7 @@ function NamespaceBrowser() {
       .then((nodes: NSNode[]) => {
         setRootNodes(nodes ?? []);
         for (const n of (nodes ?? [])) {
-          if (n.type === "tag" || n.type === "virtual") subscribeTag(n.path);
+          if (n.type === "tag" || n.type === "virtual") subscribeTag(`ns:${n.path}`);
         }
       })
       .catch(() => setRootNodes([]));
@@ -695,7 +673,7 @@ function NamespaceBrowser() {
         const data: NSNode[] = r.ok ? await r.json() : [];
         setSearchResults(data ?? []);
         for (const n of (data ?? [])) {
-          if (n.type === "tag" || n.type === "virtual") subscribeTag(n.path);
+          if (n.type === "tag" || n.type === "virtual") subscribeTag(`ns:${n.path}`);
         }
       } catch {
         setSearchResults([]);
@@ -718,7 +696,7 @@ function NamespaceBrowser() {
       const data: NSNode[] = r.ok ? await r.json() : [];
       setChildren((prev) => ({ ...prev, [path]: data ?? [] }));
       for (const n of (data ?? [])) {
-        if (n.type === "tag" || n.type === "virtual") subscribeTag(n.path);
+        if (n.type === "tag" || n.type === "virtual") subscribeTag(`ns:${n.path}`);
       }
     } catch {
       setChildren((prev) => ({ ...prev, [path]: [] }));
@@ -763,7 +741,7 @@ function NamespaceBrowser() {
                     key={n.path}
                     node={n}
                     depth={0}
-                    live={liveValues[n.path]}
+                    live={liveValues[`ns:${n.path}`]}
                     onBind={bindNSNode}
                     hasWidget={!!selectedWidgetId}
                   />
@@ -821,7 +799,7 @@ function NSTree({
           <NSNodeRow
             node={n}
             depth={depth}
-            live={liveValues[n.path]}
+            live={liveValues[`ns:${n.path}`]}
             onBind={onBind}
             hasWidget={hasWidget}
             expanded={expanded.has(n.path)}
@@ -873,9 +851,8 @@ function NSNodeRow({
   const valueText = fmtValue(live);
   const isGood = live?.quality === "Good";
 
-  const binding = node.driverId && node.driverAddr
-    ? `${node.driverId}:${node.driverAddr}`
-    : node.path;
+  // Always bind as ns:path so the runtime resolves via the namespace tree
+  const nsBinding = `ns:${node.path}`;
 
   return (
     <div
@@ -889,7 +866,7 @@ function NSNodeRow({
       }`}
       draggable={isTag}
       onDragStart={isTag ? (e) => {
-        e.dataTransfer.setData("text/x-tag-binding", binding);
+        e.dataTransfer.setData("text/x-tag-binding", nsBinding);
         e.dataTransfer.effectAllowed = "link";
       } : undefined}
       onClick={isTag ? () => onBind(node) : onToggle}
@@ -926,10 +903,12 @@ function NSNodeRow({
         )}
       </div>
 
-      {isTag && valueText && (
-        <span className={`text-[10px] font-mono shrink-0 tabular-nums ml-1 ${isGood ? "text-emerald-400" : "text-zinc-500"}`}>
-          {valueText}
-        </span>
+      {isTag && (
+        valueText
+          ? <span className={`text-[10px] font-mono shrink-0 tabular-nums ml-1 ${isGood ? "text-emerald-400" : "text-zinc-500"}`}>{valueText}</span>
+          : !node.driverId
+            ? <span className="text-[9px] text-amber-600 shrink-0 ml-1" title="No driver binding — drag a source tag onto this node or use ⊕ to bind it">⚠ unbound</span>
+            : null
       )}
     </div>
   );

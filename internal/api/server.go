@@ -115,7 +115,8 @@ func (s *Server) routes(assets http.Handler) {
 			r.Get("/tree", s.handleNSChildren)
 			r.Get("/search", s.handleNSSearch)
 			r.Post("/", s.handleNSCreate)
-			r.Delete("/*", s.handleNSDelete)
+			r.Put("/*", s.handleNSUpdate)
+				r.Delete("/*", s.handleNSDelete)
 		})
 
 		r.Route("/assets", func(r chi.Router) {

@@ -3,6 +3,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -45,13 +46,14 @@ type Runtime struct {
 	Faceplates *faceplate.Registry
 	Recipes   *recipestore.Store
 
-	mu       sync.RWMutex
-	drivers  map[string]drivers.ProtocolDriver // datasource id → driver
-	cancel   context.CancelFunc
-	pumpCtx  context.Context
-	pumpCh   chan tagstore.TagUpdate
-	wg       sync.WaitGroup
-	project  *project.Project
+	mu         sync.RWMutex
+	drivers    map[string]drivers.ProtocolDriver // datasource id → driver
+	nsAliases  map[string][]string               // "driverId:driverAddr" → []nsPath
+	cancel     context.CancelFunc
+	pumpCtx    context.Context
+	pumpCh     chan tagstore.TagUpdate
+	wg         sync.WaitGroup
+	project    *project.Project
 }
 
 // New returns an initialised runtime with the given store and historian.
@@ -117,7 +119,14 @@ func (r *Runtime) LoadProject(ctx context.Context, p *project.Project) error {
 	}
 	r.Alarms.SetRules(rules)
 
-	// Publish all widget bindings into the namespace.
+	// Load namespace from project JSON (replaces previous tree contents).
+	if len(p.Namespace) > 0 {
+		if err := json.Unmarshal(p.Namespace, r.Namespace); err != nil {
+			log.Printf("[RUNTIME] namespace unmarshal: %v", err)
+		}
+	}
+
+	// Also auto-populate namespace from direct widget bindings (backward compat).
 	for _, ds := range p.Datasources {
 		prefix := ds.ID + ":"
 		for _, pg := range p.Pages {
@@ -134,6 +143,18 @@ func (r *Runtime) LoadProject(ctx context.Context, p *project.Project) error {
 			}
 		}
 	}
+
+	// Build reverse alias map: "driverId:driverAddr" → []nsPath
+	aliases := map[string][]string{}
+	for _, n := range r.Namespace.All() {
+		if n.DriverID != "" && n.DriverAddr != "" {
+			key := n.DriverID + ":" + n.DriverAddr
+			aliases[key] = append(aliases[key], n.Path)
+		}
+	}
+	r.mu.Lock()
+	r.nsAliases = aliases
+	r.mu.Unlock()
 
 	r.Events.Publish(eventbus.Event{
 		Type:    eventbus.EventProjectLoaded,
@@ -183,6 +204,19 @@ func (r *Runtime) LoadProject(ctx context.Context, p *project.Project) error {
 			continue
 		}
 		paths := tagsForDatasource(p, ds.ID)
+		// Also subscribe to paths needed by namespace nodes bound to this driver.
+		{
+			seen := map[string]bool{}
+			for _, path := range paths {
+				seen[path] = true
+			}
+			for _, n := range r.Namespace.All() {
+				if n.DriverID == ds.ID && n.DriverAddr != "" && !seen[n.DriverAddr] {
+					seen[n.DriverAddr] = true
+					paths = append(paths, n.DriverAddr)
+				}
+			}
+		}
 		if len(paths) > 0 {
 			fanCh := make(chan tagstore.TagUpdate, 256)
 			dsID := ds.ID
@@ -283,12 +317,70 @@ func (r *Runtime) pump(ctx context.Context) {
 				_ = r.Historian.Record(u)
 			}
 			r.Alarms.Evaluate(u.Path, u.State.Value)
+			// Forward update to any namespace alias paths (ns:foo).
+			r.mu.RLock()
+			aliases := r.nsAliases[u.Path]
+			r.mu.RUnlock()
+			for _, nsPath := range aliases {
+				r.Store.Update("ns:"+nsPath, u.State)
+			}
 		}
 	}
 }
 
 // PumpChan returns the channel drivers push into. Exposed for runtime tests.
 func (r *Runtime) PumpChan() chan<- tagstore.TagUpdate { return r.pumpCh }
+
+// RebuildNSAliases rebuilds the driverId:driverAddr → nsPath reverse-lookup
+// map from the current namespace tree. Call after any namespace mutation.
+func (r *Runtime) RebuildNSAliases() {
+	aliases := map[string][]string{}
+	for _, n := range r.Namespace.All() {
+		if n.DriverID != "" && n.DriverAddr != "" {
+			key := n.DriverID + ":" + n.DriverAddr
+			aliases[key] = append(aliases[key], n.Path)
+		}
+	}
+	r.mu.Lock()
+	r.nsAliases = aliases
+	r.mu.Unlock()
+}
+
+// EnsureNSTagSubscribed makes sure the given driver is subscribed to driverAddr.
+// Call after adding a namespace node via API whose tag may not be polled yet.
+func (r *Runtime) EnsureNSTagSubscribed(driverID, driverAddr string) {
+	drv := r.Driver(driverID)
+	if drv == nil {
+		return
+	}
+	// Already in tagstore means the driver is already delivering it — no-op.
+	if _, ok := r.Store.Get(driverID + ":" + driverAddr); ok {
+		return
+	}
+	fanCh := make(chan tagstore.TagUpdate, 64)
+	dsID := driverID
+	go func() {
+		prefix := dsID + ":"
+		for {
+			select {
+			case u, ok := <-fanCh:
+				if !ok {
+					return
+				}
+				u.Path = prefix + u.Path
+				select {
+				case r.pumpCh <- u:
+				default:
+				}
+			case <-r.pumpCtx.Done():
+				return
+			}
+		}
+	}()
+	if err := drv.Subscribe(r.pumpCtx, []string{driverAddr}, fanCh); err != nil {
+		log.Printf("[RUNTIME] EnsureNSTagSubscribed %s/%s: %v", driverID, driverAddr, err)
+	}
+}
 
 // persistAlarms subscribes to the alarm engine and writes every state
 // transition to the AlarmStore so history survives restarts.

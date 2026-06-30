@@ -1,6 +1,20 @@
 // Zustand store for the in-memory project (the JSON edited by the IDE).
 import { create } from "zustand";
 
+export type NamespaceNodeType = "folder" | "asset" | "tag" | "virtual";
+
+export type NamespaceNode = {
+  path: string;
+  type: NamespaceNodeType;
+  dataType?: string;
+  description?: string;
+  unit?: string;
+  driverId?: string;
+  driverAddr?: string;
+  expression?: string;
+  meta?: Record<string, string>;
+};
+
 export type WidgetType =
   | "gauge" | "trend" | "led" | "button" | "numericInput"
   | "numericDisplay" | "textInput" | "textDisplay" | "historyLog"
@@ -159,6 +173,7 @@ export type Project = {
   udts?: UDT[];
   assets?: AssetNode[];
   faceplates?: Faceplate[];
+  namespace?: NamespaceNode[];
 };
 
 const MAX_HISTORY = 50;
@@ -219,6 +234,9 @@ type State = {
   addFaceplate: (fp: Faceplate) => void;
   updateFaceplate: (id: string, patch: Partial<Faceplate>) => void;
   removeFaceplate: (id: string) => void;
+
+  upsertNamespaceNode: (node: NamespaceNode) => void;
+  removeNamespaceNode: (path: string) => void;
 
   loadProject: (p: Project) => void;
   newProject: () => void;
@@ -578,6 +596,27 @@ export const useProject = create<State>((set, get) => {
     removeFaceplate: (id) => {
       pushHistory();
       set((s) => ({ project: { ...s.project, faceplates: (s.project.faceplates ?? []).filter((f) => f.id !== id) } }));
+    },
+
+    upsertNamespaceNode: (node) => {
+      pushHistory();
+      set((s) => {
+        const existing = s.project.namespace ?? [];
+        const idx = existing.findIndex((n) => n.path === node.path);
+        const next = idx >= 0
+          ? existing.map((n, i) => i === idx ? node : n)
+          : [...existing, node];
+        return { project: { ...s.project, namespace: next } };
+      });
+    },
+    removeNamespaceNode: (path) => {
+      pushHistory();
+      set((s) => ({
+        project: {
+          ...s.project,
+          namespace: (s.project.namespace ?? []).filter((n) => !n.path.startsWith(path)),
+        },
+      }));
     },
 
     loadProject: (p) =>

@@ -644,10 +644,11 @@ export function Canvas() {
               e.stopPropagation();
               setCtxMenu(null);
               // If widget belongs to a group, select all group members together
-              if (w.groupId && !e.shiftKey) {
+              const isAdditive = e.shiftKey || e.ctrlKey || e.metaKey;
+              if (w.groupId && !isAdditive) {
                 const groupIds = page.widgets.filter(x => x.groupId === w.groupId).map(x => x.id);
                 setSelectedIds(groupIds);
-              } else if (e.shiftKey) {
+              } else if (isAdditive) {
                 setSelectedIds(ids =>
                   ids.includes(w.id) ? ids.filter(id => id !== w.id) : [...ids, w.id]
                 );
