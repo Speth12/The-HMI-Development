@@ -69,7 +69,7 @@ func main() {
 	historyRetention := flag.Duration("history-retention", 7*24*time.Hour, "how long to keep history (e.g. 48h, 7d)")
 	alarmDB    := flag.String("alarm-db",    "alarms.db",    "SQLite file for alarm event history")
 	versionDB  := flag.String("version-db",  "versions.db",  "SQLite file for project version history")
-	securityDB := flag.String("security-db", "",             "SQLite file for users and sessions; empty (default) = no auth required")
+	securityDB := flag.String("security-db", "security.db",  "SQLite file for users and sessions")
 	auditDB    := flag.String("audit-db",    "",             "SQLite file for audit log (empty = disabled)")
 	recipeDB   := flag.String("recipe-db",   "recipes.db",   "SQLite file for recipe history and approvals")
 	jwtSecret  := flag.String("jwt-secret",  "",             "JWT signing secret (random 32+ bytes); auto-generated if empty")
@@ -136,8 +136,8 @@ func main() {
 	rt := runtime.New(store, hist)
 	rt.AlarmStore = alarmSt
 
-	// Security (optional; dev mode works without it).
-	if *securityDB != "" {
+	// Security — always on; auto-seeds admin/admin on first run.
+	{
 		secret := []byte(*jwtSecret)
 		if len(secret) == 0 {
 			secret = generateSecret()
@@ -148,7 +148,17 @@ func main() {
 		}
 		defer secSt.Close()
 		rt.Security = secSt
-		log.Printf("[X-HMI] security DB: %s", *securityDB)
+		// First-run: seed a default admin so the operator login works immediately.
+		users, _ := secSt.ListUsers(context.Background())
+		if len(users) == 0 {
+			_, err := secSt.CreateUser(context.Background(), "admin", "admin", security.RoleAdmin)
+			if err != nil {
+				log.Printf("[X-HMI] security: could not seed admin: %v", err)
+			} else {
+				log.Printf("[X-HMI] *** FIRST RUN: created admin user — username: admin  password: admin ***")
+			}
+		}
+		log.Printf("[X-HMI] security DB: %s (%d users)", *securityDB, len(users))
 	}
 
 	// Audit log (optional).
@@ -200,6 +210,7 @@ func main() {
 		assets = spaHandler()
 	}
 	srv := api.New(rt, assets, versionSt)
+	srv.DevMode = *mode == "dev"
 
 	httpSrv := &http.Server{
 		Addr:              *addr,

@@ -301,13 +301,16 @@ function NumericDisplayWidget({ w }: { w: Widget }) {
 }
 
 function TextDisplayWidget({ w }: { w: Widget }) {
-  const t = useTag(w.binding);
+  // binding without ":" is treated as a literal constant (e.g. "Pump Status")
+  const isLiveBinding = !!w.binding?.includes(":");
+  const t = useTag(isLiveBinding ? w.binding : undefined);
   const staticText = w.config?.staticText as string | undefined;
   const align = (w.config?.textAlign as string) || "left";
   const justifyCls = align === "center" ? "justify-center" : align === "right" ? "justify-end" : "justify-start";
+  const displayText = staticText ?? (isLiveBinding ? fmt(t.value) : (w.binding ?? ""));
   return (
     <div className={`break-words h-full flex items-center ${justifyCls} text-lg`}>
-      {staticText ?? fmt(t.value)}
+      {displayText}
     </div>
   );
 }

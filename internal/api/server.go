@@ -16,6 +16,7 @@ type Server struct {
 	rt       *runtime.Runtime
 	versions *versionstore.Store
 	router   chi.Router
+	DevMode  bool // when true, JWT auth is bypassed (IDE / local dev)
 }
 
 // New builds a configured Server. assets and vs may be nil.

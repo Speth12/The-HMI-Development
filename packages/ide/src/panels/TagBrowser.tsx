@@ -84,6 +84,7 @@ export function TagScannerModal({
     { addr: "holding:0", name: "Register0" },
   ]);
 
+  const { upsertNamespaceNode } = useProject();
   const isModbus = dsType === "mbtcp";
 
   useEffect(() => {
@@ -142,13 +143,19 @@ export function TagScannerModal({
       if (isModbus) {
         const mb = item as { addr: string; name: string };
         const nsPath = `${slugify(dsLabel)}.${slugify(mb.name || mb.addr)}`;
-        try { await publishToNS(nsPath, dsId, mb.addr); out.push({ path: nsPath, ok: true, msg: "published" }); }
-        catch (e) { out.push({ path: nsPath, ok: false, msg: (e as Error).message }); }
+        try {
+          await publishToNS(nsPath, dsId, mb.addr);
+          upsertNamespaceNode({ path: nsPath, type: "tag", driverId: dsId, driverAddr: mb.addr });
+          out.push({ path: nsPath, ok: true, msg: "published" });
+        } catch (e) { out.push({ path: nsPath, ok: false, msg: (e as Error).message }); }
       } else {
         const tag = item as TagDef;
         const nsPath = defaultNSPath(tag);
-        try { await publishToNS(nsPath, dsId, tag.Path); out.push({ path: nsPath, ok: true, msg: "published" }); }
-        catch (e) { out.push({ path: nsPath, ok: false, msg: (e as Error).message }); }
+        try {
+          await publishToNS(nsPath, dsId, tag.Path);
+          upsertNamespaceNode({ path: nsPath, type: "tag", driverId: dsId, driverAddr: tag.Path });
+          out.push({ path: nsPath, ok: true, msg: "published" });
+        } catch (e) { out.push({ path: nsPath, ok: false, msg: (e as Error).message }); }
       }
     }
     setResults(out);
@@ -367,7 +374,7 @@ export function TagBrowser() {
 // ── By-Source browser ──────────────────────────────────────────────────────
 
 function SourceBrowser() {
-  const { project, selectedWidgetId, activePageId, updateWidget } = useProject();
+  const { project, selectedWidgetId, activePageId, updateWidget, upsertNamespaceNode } = useProject();
   const [byDS, setByDS]             = useState<Record<string, TagDef[]>>({});
   const [statusByDS, setStatusByDS] = useState<Record<string, DSStatus | null>>({});
   const [busy, setBusy]             = useState(false);
@@ -444,6 +451,7 @@ function SourceBrowser() {
     setNsMsg(null);
     try {
       await publishToNS(nsDraft.trim(), dsId, driverAddr);
+      upsertNamespaceNode({ path: nsDraft.trim(), type: "tag", driverId: dsId, driverAddr });
       setNsMsg({ ok: true, text: "Published!" });
       setTimeout(() => { setNsExpanded(null); setNsMsg(null); }, 1200);
     } catch (e) {

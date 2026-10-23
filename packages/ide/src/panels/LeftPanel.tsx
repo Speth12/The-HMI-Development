@@ -264,13 +264,23 @@ export function LeftPanel({ width }: { width?: number }) {
               return (
                 <div key={d.id} className="group flex items-center gap-2 px-4 py-1.5">
                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} title={st} />
-                  <div className="flex-1 min-w-0">
+                  <div
+                    className="flex-1 min-w-0 cursor-pointer"
+                    onClick={() => setScannerDS({ id: d.id, label: d.label, type: d.type })}
+                    title="Click to scan tags / publish to namespace"
+                  >
                     <div className="text-[11px] text-zinc-200 truncate">{d.label}</div>
                     <div className="text-[9px] text-zinc-600 font-mono">[{d.id}] {d.type}</div>
                   </div>
                   <button
+                    onClick={() => setScannerDS({ id: d.id, label: d.label, type: d.type })}
+                    className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-blue-400 text-[10px] shrink-0 transition-opacity"
+                    title="Scan tags"
+                  >⊕</button>
+                  <button
                     onClick={() => removeDatasource(d.id)}
                     className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 text-[11px] shrink-0 transition-opacity"
+                    title="Remove datasource"
                   >×</button>
                 </div>
               );
@@ -281,6 +291,11 @@ export function LeftPanel({ width }: { width?: number }) {
         {/* Tags */}
         <TreeSection label="Tags">
           <TagBrowser />
+        </TreeSection>
+
+        {/* Namespace */}
+        <TreeSection label="Namespace" count={project.namespace?.length}>
+          <Namespace />
         </TreeSection>
 
         {/* Alarms */}
@@ -300,11 +315,6 @@ export function LeftPanel({ width }: { width?: number }) {
         {/* Users */}
         <TreeSection label="Users" count={project.users?.length}>
           <Users />
-        </TreeSection>
-
-        {/* Namespace */}
-        <TreeSection label="Namespace" count={project.namespace?.length}>
-          <Namespace />
         </TreeSection>
 
         {/* Assets & Faceplates */}

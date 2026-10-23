@@ -28,11 +28,11 @@ func claimedRole(r *http.Request) security.Role {
 	return v
 }
 
-// jwtMiddleware validates Bearer tokens.  If Security is nil (dev mode) it
-// injects "anonymous" / "admin" so all routes remain accessible.
+// jwtMiddleware validates Bearer tokens.  If Security is nil or DevMode is
+// true it injects "anonymous" / "admin" so all routes remain accessible.
 func (s *Server) jwtMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.rt.Security == nil {
+		if s.rt.Security == nil || s.DevMode {
 			ctx := context.WithValue(r.Context(), ctxUser, "anonymous")
 			ctx = context.WithValue(ctx, ctxRole, security.RoleAdmin)
 			next.ServeHTTP(w, r.WithContext(ctx))

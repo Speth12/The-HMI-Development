@@ -77,6 +77,12 @@ function NSTreeRow({
           selected === node.path ? "bg-blue-600/15" : ""
         }`}
         style={{ paddingLeft: `${12 + depth * 14}px` }}
+        draggable={!isFolder}
+        onDragStart={(e) => {
+          if (isFolder) return;
+          e.dataTransfer.setData("text/x-tag-binding", `ns:${node.path}`);
+          e.dataTransfer.effectAllowed = "link";
+        }}
         onClick={() => { onSelect(node.path); if (isFolder) setOpen((v) => !v); }}
       >
         {isFolder ? (
